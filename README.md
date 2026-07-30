@@ -82,6 +82,7 @@ The application follows the ESA WorldCover and WorldPop API pattern:
 - Administrators create, activate, promote, and remove users at `/manage-users`.
 - Each non-admin user receives a persistent bearer token. An administrator can regenerate it.
 - JWT cookies authenticate web sessions. Persistent user tokens authenticate API requests.
+- Every active user can inspect the current GLO-30 tile inventory at `/tile-cache`.
 - `/docs` and `/openapi.json` are available only after sign-in. Swagger is pre-authorised with
   the signed-in regular user's bearer token.
 

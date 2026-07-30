@@ -18,6 +18,10 @@ class CachedTileRepository:
         result = await self.db.execute(select(CachedTile).where(CachedTile.expires_at < now))
         return list(result.scalars().all())
 
+    async def list_all(self) -> list[CachedTile]:
+        result = await self.db.execute(select(CachedTile).order_by(CachedTile.last_used_at.desc()))
+        return list(result.scalars().all())
+
     async def add(self, tile: CachedTile) -> CachedTile:
         self.db.add(tile)
         await self.db.flush()

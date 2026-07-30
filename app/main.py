@@ -21,7 +21,7 @@ from app.exceptions import (
     ViewshedProcessingError,
 )
 from app.models.user import User
-from app.routers import auth, users, viewsheds
+from app.routers import auth, tile_cache, users, viewsheds
 from app.schemas.health import HealthResponse
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     )
     application.include_router(auth.router)
     application.include_router(users.router)
+    application.include_router(tile_cache.router)
     application.include_router(viewsheds.router)
     register_exception_handlers(application)
 
