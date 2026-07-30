@@ -1,1 +1,12 @@
 docker-compose.yml
+/tmp/
+.env
+.venv/
+.idea/
+data/
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]

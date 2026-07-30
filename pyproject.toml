@@ -1,0 +1,34 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["app/tests"]
+markers = ["integration: requires external Copernicus S3 access"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["tmp", "migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+exclude = ["app/tests", "migrations"]
+
+[[tool.mypy.overrides]]
+module = [
+  "boto3.*",
+  "botocore.*",
+  "jose.*",
+  "markdown.*",
+  "passlib.*",
+  "pyproj.*",
+  "rasterio.*",
+  "shapely.*",
+]
+ignore_missing_imports = true

@@ -1,0 +1,80 @@
+from collections.abc import Awaitable, Callable
+
+import pytest
+from httpx import AsyncClient
+
+from app.dependencies import get_viewshed_service
+from app.main import app
+from app.models.user import User
+from app.schemas.viewshed import (
+    GeoJSONFeature,
+    GeoJSONGeometry,
+    ViewshedProperties,
+    ViewshedRequest,
+)
+
+
+class FakeViewshedService:
+    async def create(self, request: ViewshedRequest) -> GeoJSONFeature:
+        return GeoJSONFeature(
+            properties=ViewshedProperties(
+                observer_height_agl_m=request.observer_height_agl_m,
+                observer_coordinates=request.observer_coordinates,
+                target_height_agl_m=request.target_height_agl_m,
+                radius_m=request.radius_m,
+                visible_area_sq_km=0.9,
+                visible_pixel_count=1000,
+                resolution_m=30,
+                earth_curvature=True,
+                refraction_coefficient=1 / 7,
+            ),
+            geometry=GeoJSONGeometry(
+                type="Polygon",
+                coordinates=[
+                    [
+                        [174.0, -39.0],
+                        [174.1, -39.0],
+                        [174.1, -39.1],
+                        [174.0, -39.0],
+                    ]
+                ],
+            ),
+        )
+
+
+REQUEST_BODY = {
+    "observer_coordinates": [174.0, -39.0],
+    "observer_height_agl_m": 30,
+    "target_height_agl_m": 0,
+    "radius_m": 1000,
+}
+
+
+@pytest.mark.asyncio
+async def test_viewshed_requires_authentication(client: AsyncClient) -> None:
+    response = await client.post("/api/v1/viewsheds", json=REQUEST_BODY)
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.asyncio
+async def test_viewshed_returns_typed_geojson(
+    client: AsyncClient,
+    create_test_user: Callable[..., Awaitable[User]],
+) -> None:
+    await create_test_user()
+    app.dependency_overrides[get_viewshed_service] = lambda: FakeViewshedService()
+
+    response = await client.post(
+        "/api/v1/viewsheds",
+        json=REQUEST_BODY,
+        headers={"Authorization": "Bearer test-bearer-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "Feature"
+    assert payload["properties"]["dem"] == "Copernicus GLO-30 DGED"
+    assert payload["properties"]["observer_coordinates"] == [174.0, -39.0]
+    assert payload["geometry"]["type"] == "Polygon"
