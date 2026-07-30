@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.user import User
 from app.repositories.cached_tiles import CachedTileRepository
 from app.repositories.users import UserRepository
-from app.services.auth import decode_access_token
+from app.services.auth import SESSION_COOKIE_NAME, decode_access_token
 from app.services.s3_tiles import S3TileService
 from app.services.users import UserService
 from app.services.viewshed import ViewshedProcessor, ViewshedService
@@ -26,7 +26,7 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User | None:
-    token = credentials.credentials if credentials else request.cookies.get("access_token")
+    token = credentials.credentials if credentials else request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
 

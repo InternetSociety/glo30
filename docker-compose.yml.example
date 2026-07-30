@@ -9,9 +9,9 @@ services:
       TILE_CACHE_DIR: /app/data/tiles
     command: >-
       sh -c "alembic upgrade head && exec uvicorn app.main:app
-      --host 0.0.0.0 --port 8000 --reload"
+      --host 0.0.0.0 --port 8004 --reload"
     ports:
-      - "8000:8000"
+      - "8004:8004"
     volumes:
       - .:/app
       - glo30-data:/app/data

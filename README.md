@@ -128,7 +128,7 @@ The application and all development tools run only through Docker Compose.
 docker compose up --build
 ```
 
-The service listens on `http://localhost:8000`. The Compose command applies migrations before
+The service listens on `http://localhost:8004`. The Compose command applies migrations before
 starting Uvicorn.
 
 Run migrations explicitly:

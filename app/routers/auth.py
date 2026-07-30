@@ -15,7 +15,7 @@ from app.dependencies import get_current_active_user, get_current_user
 from app.models.user import User
 from app.repositories.users import UserRepository
 from app.schemas.auth import TokenResponse
-from app.services.auth import create_access_token, verify_password
+from app.services.auth import SESSION_COOKIE_NAME, create_access_token, verify_password
 from app.services.users import UserService
 
 router = APIRouter(tags=["Authentication and UI"])
@@ -49,7 +49,7 @@ async def login(
     await UserService(repository).mark_login(user)
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
-        key="access_token",
+        key=SESSION_COOKIE_NAME,
         value=create_access_token(user.email, settings),
         httponly=True,
         secure=settings.cookie_secure,
@@ -82,7 +82,7 @@ async def login_for_access_token(
 @router.post("/logout", response_class=RedirectResponse, include_in_schema=False)
 async def logout() -> RedirectResponse:
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie("access_token", path="/")
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response
 
 

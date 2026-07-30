@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from app.config import Settings
 
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SESSION_COOKIE_NAME = "glo30_session"
 
 
 def hash_password(password: str) -> str:

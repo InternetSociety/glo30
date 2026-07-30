@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.services.auth import SESSION_COOKIE_NAME
 
 
 @pytest.mark.asyncio
@@ -42,6 +43,30 @@ async def test_regular_user_can_view_own_api_token(
 
 
 @pytest.mark.asyncio
+async def test_web_login_uses_an_app_specific_session_cookie(
+    client: AsyncClient,
+    create_test_user: Callable[..., Awaitable[User]],
+) -> None:
+    await create_test_user(
+        email="admin@example.com",
+        bearer_token=None,
+        is_admin=True,
+    )
+    client.cookies.set("access_token", "another-local-application-session")
+
+    login = await client.post(
+        "/login",
+        data={"username": "admin@example.com", "password": "correct-horse"},
+    )
+    home = await client.get("/")
+
+    assert login.status_code == 303
+    assert SESSION_COOKIE_NAME in login.cookies
+    assert "Signed in as" in home.text
+    assert "admin@example.com" in home.text
+
+
+@pytest.mark.asyncio
 async def test_admin_can_create_user_from_management_ui(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -56,12 +81,11 @@ async def test_admin_can_create_user_from_management_ui(
         "/login",
         data={"username": "admin@example.com", "password": "correct-horse"},
     )
-    cookie = login.cookies["access_token"]
+    assert SESSION_COOKIE_NAME in login.cookies
 
     response = await client.post(
         "/users/create",
         data={"email": "new@example.com", "password": "long-enough-password"},
-        cookies={"access_token": cookie},
     )
 
     assert response.status_code == 303
