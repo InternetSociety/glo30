@@ -4,6 +4,11 @@ This FastAPI service returns a terrain viewshed as a GeoJSON `Feature`. It downl
 required Copernicus GLO-30 DGED tiles from the Copernicus Data Space Ecosystem S3 service,
 caches them locally, and performs each calculation in a local metre-based projection.
 
+## Attribution
+
+Terrain data produced using Copernicus WorldDEM™-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA; all rights reserved.
+
+
 ## API
 
 `POST /api/v1/viewsheds` requires a bearer token and a JSON body:
@@ -76,8 +81,6 @@ catalogue discovery by setting `glo30_s3_prefix`; that prefix must use this layo
 
 ## Authentication and users
 
-The application follows the ESA WorldCover and WorldPop API pattern:
-
 - Administrators sign into the web UI with email and password.
 - Administrators create, activate, promote, and remove users at `/manage-users`.
 - Each non-admin user receives a persistent bearer token. An administrator can regenerate it.
@@ -120,6 +123,10 @@ secret_key = a-long-random-deployment-secret
 
 `s3_host_bucket` is retained for compatibility with the supplied configuration; the actual S3
 bucket name defaults to `eodata` and can be changed with `s3_bucket_name`.
+
+s3 access and secret keys are provided by Compernicus.
+
+Running the application requires a Copernicus Data Space Ecosystem (CDSE) account that is registered for Copernicus Contributing Missions (CCM) access. Account holders may generate s3 credentials through the Copernicus Data Portal. The application downloads and caches the required terrain tiles using the authenticated CDSE APIs. Information on registering for CCM access and the available download interfaces (Copernicus Browser, OData and S3) is available from the Copernicus Data Space Ecosystem documentation.
 
 ## Docker Compose operation
 
@@ -170,3 +177,6 @@ migrations/
 Dockerfile
 docker-compose.yml.example
 ```
+## Citation
+
+Copernicus DEM GLO-30 (DGED). European Space Agency (ESA) and the Copernicus Programme. Digital Surface Model (DSM), 30 m global resolution. DOI: 10.5270/ESA-c5d3d65.

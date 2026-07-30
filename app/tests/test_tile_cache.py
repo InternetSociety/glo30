@@ -66,6 +66,16 @@ async def test_regular_user_can_view_cached_tiles(
     assert newer.file_path in response.text
     assert response.text.index(newer.tile_id) < response.text.index(older.tile_id)
     assert 'href="/tile-cache"' in home.text
+    menu_labels = [
+        "User Management",
+        "Application Documentation",
+        "API Documentation (/docs)",
+        "Tile Cache",
+    ]
+    assert all(label in home.text for label in menu_labels)
+    assert [home.text.index(label) for label in menu_labels] == sorted(
+        home.text.index(label) for label in menu_labels
+    )
 
 
 @pytest.mark.asyncio
