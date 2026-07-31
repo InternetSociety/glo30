@@ -50,19 +50,40 @@ The response is a GeoJSON Polygon or MultiPolygon:
 ```
 
 The visible area and pixel count are calculated from the binary 30 m raster before geometry
-simplification. The output geometry budget is `ceil(visible_area_sq_km × 10)` vertices, with a
-minimum of four vertices so that very small results can still form a valid polygon. Small
-components may collapse during simplification when that is necessary to meet the budget.
+simplification. By default, the output geometry budget is
+`ceil(visible_area_sq_km × geometry_vertices_per_sq_km)` vertices, with the
+`geometry_min_vertex_budget` floor. Small components may collapse during simplification when that
+is necessary to meet the budget.
+
+### Output shape tuning
+
+All tuning values are environment-backed settings documented beside their defaults in
+`app/config.py`. The most useful controls are:
+
+- `geometry_vertices_per_sq_km` (default `20`): increase this first to retain more curved edges
+  and detail. It controls a global budget shared by all polygons and holes.
+- `geometry_min_vertex_budget` (default `8`): raises the budget only for very small total visible
+  areas; it is not a per-polygon minimum.
+- `dem_resolution_m` (default `30`): lower values create a finer working raster at substantially
+  greater memory and compute cost. Values below GLO-30's native detail interpolate the source.
+- `dem_resampling_method` (default `bilinear`): controls elevation interpolation onto that grid.
+- `geometry_polygon_connectivity` and `geometry_simplification_preserve_topology`: control how
+  diagonal cells, components, and holes survive polygonisation and simplification.
+
+The remaining simplification search controls are normally left at their defaults. The
+`coverage_boundary_sample_interval_degrees` setting only identifies source tiles and does not
+change output polygon detail.
+
 
 ## Viewshed method
 
 For every request the service:
 
-1. Constructs the geodesic bounds of the requested circle and identifies all intersecting
-   one-degree GLO-30 geocells.
+1. Samples the requested circle at the configured coverage-boundary interval, constructs its
+   geodesic bounds, and identifies all intersecting one-degree GLO-30 geocells.
 2. Downloads missing DGED GeoTIFFs from S3 and records them in the SQLite tile cache.
 3. Reprojects the required data into an Azimuthal Equidistant CRS centred on the observer,
-   using a 30 m output grid.
+   using the configured output grid (30 m by default).
 4. Runs GDAL `gdal_viewshed` with the requested observer and target heights and maximum distance.
 5. Applies Earth curvature using GDAL curvature coefficient `1 - 1/7`; the corresponding
    atmospheric refraction coefficient is `1/7`.

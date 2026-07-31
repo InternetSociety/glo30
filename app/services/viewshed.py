@@ -85,11 +85,20 @@ class ViewshedProcessor:
 
             geometry = self._polygonize(visible, output_transform)
             visible_area_sq_km = visible_pixel_count * self.settings.dem_resolution_m**2 / 1_000_000
-            vertex_budget = max(4, math.ceil(visible_area_sq_km * 10))
+            vertex_budget = vertex_budget_for_visible_area(
+                visible_area_sq_km,
+                vertices_per_sq_km=self.settings.geometry_vertices_per_sq_km,
+                minimum_vertex_budget=self.settings.geometry_min_vertex_budget,
+            )
             geometry = simplify_to_vertex_budget(
                 geometry,
                 vertex_budget,
-                max_tolerance=request.radius_m * 2,
+                max_tolerance=(
+                    request.radius_m
+                    * self.settings.geometry_simplification_max_tolerance_radius_multiplier
+                ),
+                search_iterations=self.settings.geometry_simplification_search_iterations,
+                preserve_topology=self.settings.geometry_simplification_preserve_topology,
             )
             wgs84_geometry = transform(
                 Transformer.from_crs(local_crs, "EPSG:4326", always_xy=True).transform,
@@ -146,7 +155,7 @@ class ViewshedProcessor:
                         dst_transform=destination_transform,
                         dst_crs=local_crs,
                         dst_nodata=DEM_NODATA,
-                        resampling=Resampling.bilinear,
+                        resampling=Resampling[self.settings.dem_resampling_method],
                         init_dest_nodata=False,
                         num_threads=2,
                     )
@@ -255,15 +264,18 @@ class ViewshedProcessor:
         y_coordinates = affine.f + rows * affine.e
         return (y_coordinates[:, None] ** 2 + x_coordinates[None, :] ** 2) <= radius_m**2
 
-    @staticmethod
-    def _polygonize(visible: np.ndarray[Any, np.dtype[np.bool_]], affine: Any) -> BaseGeometry:
+    def _polygonize(
+        self,
+        visible: np.ndarray[Any, np.dtype[np.bool_]],
+        affine: Any,
+    ) -> BaseGeometry:
         polygons = [
             shape(geometry)
             for geometry, value in shapes(
                 visible.astype(np.uint8),
                 mask=visible,
                 transform=affine,
-                connectivity=8,
+                connectivity=self.settings.geometry_polygon_connectivity,
             )
             if value == 1
         ]
@@ -340,24 +352,35 @@ def vertex_count(geometry: BaseGeometry) -> int:
     return 0
 
 
+def vertex_budget_for_visible_area(
+    visible_area_sq_km: float,
+    *,
+    vertices_per_sq_km: float,
+    minimum_vertex_budget: int,
+) -> int:
+    return max(minimum_vertex_budget, math.ceil(visible_area_sq_km * vertices_per_sq_km))
+
+
 def simplify_to_vertex_budget(
     geometry: BaseGeometry,
     vertex_budget: int,
     *,
     max_tolerance: float,
+    search_iterations: int,
+    preserve_topology: bool,
 ) -> BaseGeometry:
     geometry = polygonal_geometry(make_valid(geometry))
     if vertex_count(geometry) <= vertex_budget:
         return geometry
 
     low = 0.0
-    high = max(max_tolerance, 1.0)
+    high = max_tolerance
     best: BaseGeometry | None = None
 
-    for _ in range(40):
+    for _ in range(search_iterations):
         midpoint = (low + high) / 2
         candidate = polygonal_geometry(
-            make_valid(geometry.simplify(midpoint, preserve_topology=False))
+            make_valid(geometry.simplify(midpoint, preserve_topology=preserve_topology))
         )
         if candidate.is_empty:
             high = midpoint

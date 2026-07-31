@@ -10,6 +10,8 @@ def test_simplification_meets_vertex_budget() -> None:
         detailed_circle,
         vertex_budget=10,
         max_tolerance=2000,
+        search_iterations=40,
+        preserve_topology=False,
     )
 
     assert not simplified.is_empty

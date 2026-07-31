@@ -8,6 +8,7 @@ import pytest
 from app.config import Settings
 from app.exceptions import TileDownloadError
 from app.models.cached_tile import CachedTile
+from app.services import s3_tiles
 from app.services.s3_tiles import (
     S3TileService,
     ccm_prefix_for_product,
@@ -78,11 +79,34 @@ def test_geocell_center_parses_hemispheres() -> None:
 
 
 def test_geocells_for_small_circle_returns_containing_cell() -> None:
-    assert geocells_for_circle(174.5, -39.5, 100) == ["Copernicus_DSM_10_S40_00_E174_00"]
+    assert geocells_for_circle(174.5, -39.5, 100, 0.5) == ["Copernicus_DSM_10_S40_00_E174_00"]
+
+
+def test_geocell_circle_is_sampled_at_half_degree_intervals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    azimuths: list[float] = []
+
+    class RecordingGeod:
+        @staticmethod
+        def fwd(
+            longitude: float,
+            latitude: float,
+            azimuth: float,
+            _radius_m: float,
+        ) -> tuple[float, float, float]:
+            azimuths.append(azimuth)
+            return longitude, latitude, 0
+
+    monkeypatch.setattr(s3_tiles, "WGS84_GEOD", RecordingGeod())
+
+    geocells_for_circle(174.5, -39.5, 100, 0.5)
+
+    assert azimuths == [half_degree / 2 for half_degree in range(360 * 2)]
 
 
 def test_geocells_cover_a_degree_boundary() -> None:
-    cells = geocells_for_circle(174.0, -39.0, 1000)
+    cells = geocells_for_circle(174.0, -39.0, 1000, 0.5)
     assert set(cells) == {
         "Copernicus_DSM_10_S40_00_E173_00",
         "Copernicus_DSM_10_S40_00_E174_00",

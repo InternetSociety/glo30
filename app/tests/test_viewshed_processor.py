@@ -8,7 +8,11 @@ from shapely.geometry import shape
 
 from app.config import Settings
 from app.schemas.viewshed import ViewshedRequest
-from app.services.viewshed import ViewshedProcessor, vertex_count
+from app.services.viewshed import (
+    ViewshedProcessor,
+    vertex_budget_for_visible_area,
+    vertex_count,
+)
 
 
 def write_flat_dem(path: Path) -> None:
@@ -47,10 +51,37 @@ def test_processor_runs_full_gdal_pipeline_on_flat_dem(tmp_path: Path) -> None:
     result = ViewshedProcessor(settings).process([tile_path], request)
 
     geometry = shape(result.geometry)
-    vertex_budget = max(4, math.ceil(result.visible_area_sq_km * 10))
+    vertex_budget = max(
+        settings.geometry_min_vertex_budget,
+        math.ceil(result.visible_area_sq_km * settings.geometry_vertices_per_sq_km),
+    )
     assert result.visible_pixel_count > 250
     assert result.visible_area_sq_km > 0.2
     assert geometry.geom_type in {"Polygon", "MultiPolygon"}
     assert vertex_count(geometry) <= vertex_budget
     assert geometry.bounds[0] >= 174.49
     assert geometry.bounds[2] <= 174.51
+
+
+def test_vertex_budget_uses_twenty_vertices_per_square_kilometre_with_minimum_eight() -> None:
+    settings = Settings(_env_file=None)
+
+    def budget(visible_area_sq_km: float) -> int:
+        return vertex_budget_for_visible_area(
+            visible_area_sq_km,
+            vertices_per_sq_km=settings.geometry_vertices_per_sq_km,
+            minimum_vertex_budget=settings.geometry_min_vertex_budget,
+        )
+
+    assert [budget(area) for area in (0, 0.4, 0.4001)] == [8, 8, 9]
+
+
+def test_vertex_budget_accepts_custom_resolution_settings() -> None:
+    assert (
+        vertex_budget_for_visible_area(
+            10.0782,
+            vertices_per_sq_km=100,
+            minimum_vertex_budget=16,
+        )
+        == 1008
+    )

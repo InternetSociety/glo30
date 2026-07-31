@@ -110,11 +110,19 @@ def geocells_for_circle(
     longitude: float,
     latitude: float,
     radius_m: float,
+    sample_interval_degrees: float,
 ) -> list[str]:
     """Return every one-degree geocell touched by a geodesic circle's bounds."""
 
+    sample_count = math.ceil(360 / sample_interval_degrees)
     samples = [
-        WGS84_GEOD.fwd(longitude, latitude, azimuth, radius_m)[:2] for azimuth in range(0, 360, 2)
+        WGS84_GEOD.fwd(
+            longitude,
+            latitude,
+            sample_index * sample_interval_degrees,
+            radius_m,
+        )[:2]
+        for sample_index in range(sample_count)
     ]
     sampled_longitudes = [point[0] for point in samples]
     sampled_latitudes = [point[1] for point in samples]
@@ -162,7 +170,12 @@ class S3TileService:
         latitude: float,
         radius_m: float,
     ) -> list[Path]:
-        tile_ids = geocells_for_circle(longitude, latitude, radius_m)
+        tile_ids = geocells_for_circle(
+            longitude,
+            latitude,
+            radius_m,
+            self.settings.coverage_boundary_sample_interval_degrees,
+        )
         paths: list[Path] = []
         for tile_id in tile_ids:
             paths.append(await self._get_tile(tile_id))

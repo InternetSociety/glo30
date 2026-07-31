@@ -57,7 +57,10 @@ async def test_real_s3_tile_and_viewshed_pipeline(tmp_path: Path) -> None:
     result = ViewshedProcessor(integration_settings).process(tiles, request)
 
     geometry = shape(result.geometry)
-    budget = max(4, math.ceil(result.visible_area_sq_km * 10))
+    budget = max(
+        integration_settings.geometry_min_vertex_budget,
+        math.ceil(result.visible_area_sq_km * integration_settings.geometry_vertices_per_sq_km),
+    )
     assert result.visible_pixel_count > 0
     assert not geometry.is_empty
     assert vertex_count(geometry) <= budget
