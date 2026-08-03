@@ -1,4 +1,3 @@
-import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +9,7 @@ from app.config import settings
 from app.models.cached_tile import CachedTile
 from app.schemas.viewshed import ViewshedRequest
 from app.services.s3_tiles import S3TileService
-from app.services.viewshed import ViewshedProcessor, vertex_count
+from app.services.viewshed import ViewshedProcessor, vertex_budget_for_visible_area, vertex_count
 
 
 class IntegrationTileRepository:
@@ -57,9 +56,11 @@ async def test_real_s3_tile_and_viewshed_pipeline(tmp_path: Path) -> None:
     result = ViewshedProcessor(integration_settings).process(tiles, request)
 
     geometry = shape(result.geometry)
-    budget = max(
-        integration_settings.geometry_min_vertex_budget,
-        math.ceil(result.visible_area_sq_km * integration_settings.geometry_vertices_per_sq_km),
+    budget = vertex_budget_for_visible_area(
+        result.visible_area_sq_km,
+        vertices_per_sq_km=integration_settings.geometry_vertices_per_sq_km,
+        minimum_vertex_budget=integration_settings.geometry_min_vertex_budget,
+        maximum_vertex_budget=integration_settings.geometry_max_vertex_budget,
     )
     assert result.visible_pixel_count > 0
     assert not geometry.is_empty

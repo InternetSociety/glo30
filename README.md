@@ -51,19 +51,21 @@ The response is a GeoJSON Polygon or MultiPolygon:
 
 The visible area and pixel count are calculated from the binary 30 m raster before geometry
 simplification. By default, the output geometry budget is
-`ceil(visible_area_sq_km × geometry_vertices_per_sq_km)` vertices, with the
-`geometry_min_vertex_budget` floor. Small components may collapse during simplification when that
-is necessary to meet the budget.
+`ceil(visible_area_sq_km × geometry_vertices_per_sq_km)` vertices, clamped between the
+`geometry_min_vertex_budget` floor and `geometry_max_vertex_budget` ceiling. Small components may
+collapse during simplification when that is necessary to meet the budget.
 
 ### Output shape tuning
 
 All tuning values are environment-backed settings documented beside their defaults in
 `app/config.py`. The most useful controls are:
 
-- `geometry_vertices_per_sq_km` (default `20`): increase this first to retain more curved edges
+- `geometry_vertices_per_sq_km` (default `100`): increase this first to retain more curved edges
   and detail. It controls a global budget shared by all polygons and holes.
 - `geometry_min_vertex_budget` (default `8`): raises the budget only for very small total visible
   areas; it is not a per-polygon minimum.
+- `geometry_max_vertex_budget` (default `10000`): caps geometry complexity and response size for
+  large visible areas.
 - `dem_resolution_m` (default `30`): lower values create a finer working raster at substantially
   greater memory and compute cost. Values below GLO-30's native detail interpolate the source.
 - `dem_resampling_method` (default `bilinear`): controls elevation interpolation onto that grid.

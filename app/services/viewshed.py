@@ -89,6 +89,7 @@ class ViewshedProcessor:
                 visible_area_sq_km,
                 vertices_per_sq_km=self.settings.geometry_vertices_per_sq_km,
                 minimum_vertex_budget=self.settings.geometry_min_vertex_budget,
+                maximum_vertex_budget=self.settings.geometry_max_vertex_budget,
             )
             geometry = simplify_to_vertex_budget(
                 geometry,
@@ -357,8 +358,14 @@ def vertex_budget_for_visible_area(
     *,
     vertices_per_sq_km: float,
     minimum_vertex_budget: int,
+    maximum_vertex_budget: int,
 ) -> int:
-    return max(minimum_vertex_budget, math.ceil(visible_area_sq_km * vertices_per_sq_km))
+    if maximum_vertex_budget < minimum_vertex_budget:
+        raise ValueError(
+            "maximum_vertex_budget must be greater than or equal to minimum_vertex_budget"
+        )
+    area_vertex_budget = math.ceil(visible_area_sq_km * vertices_per_sq_km)
+    return min(maximum_vertex_budget, max(minimum_vertex_budget, area_vertex_budget))
 
 
 def simplify_to_vertex_budget(

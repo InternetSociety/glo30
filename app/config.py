@@ -1,8 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,13 +56,15 @@ class Settings(BaseSettings):
     )
 
     # The simplifier's global vertex budget is:
-    #   max(geometry_min_vertex_budget,
-    #       ceil(visible_area_sq_km * geometry_vertices_per_sq_km))
+    #   min(geometry_max_vertex_budget,
+    #       max(geometry_min_vertex_budget,
+    #           ceil(visible_area_sq_km * geometry_vertices_per_sq_km)))
     # Increasing the density is the main way to retain curved edges and detail. It also increases
-    # response size. The budget is shared by every polygon and hole in a result, not applied to
-    # each ring independently.
+    # response size until the maximum is reached. The budget is shared by every polygon and hole
+    # in a result, not applied to each ring independently.
     geometry_vertices_per_sq_km: float = Field(default=100.0, ge=0)
     geometry_min_vertex_budget: int = Field(default=8, ge=4)
+    geometry_max_vertex_budget: int = Field(default=10_000, ge=4)
 
     # Rasterio supports connectivity 4 or 8 when joining visible raster cells. Eight joins cells
     # that touch diagonally and usually produces fewer fragmented polygons; four keeps them apart.
@@ -85,6 +87,15 @@ class Settings(BaseSettings):
     refraction_coefficient: float = 1.0 / 7.0
     gdal_viewshed_path: str = "gdal_viewshed"
     viewshed_timeout_seconds: int = 300
+
+    @model_validator(mode="after")
+    def validate_geometry_vertex_budgets(self) -> Self:
+        if self.geometry_max_vertex_budget < self.geometry_min_vertex_budget:
+            raise ValueError(
+                "geometry_max_vertex_budget must be greater than or equal to "
+                "geometry_min_vertex_budget"
+            )
+        return self
 
     @property
     def s3_endpoint_url(self) -> str:
