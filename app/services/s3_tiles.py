@@ -14,7 +14,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from pyproj import Geod
 
 from app.config import Settings
-from app.exceptions import TileDownloadError
+from app.exceptions import DemCoverageError, TileDownloadError
 from app.models.cached_tile import CachedTile
 from app.repositories.cached_tiles import CachedTileRepository
 
@@ -27,6 +27,15 @@ GEOCELL_PATTERN = re.compile(
     r"^Copernicus_DSM_10_(?P<latitude_hemisphere>[NS])(?P<latitude>\d{2})_00_"
     r"(?P<longitude_hemisphere>[EW])(?P<longitude>\d{3})_00$"
 )
+RESTRICTED_GEOGRAPHY_MESSAGE = (
+    "The geography you have requested is not yet released to the public. Please visit "
+    "https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available "
+    "for more information"
+)
+UNAVAILABLE_GEOGRAPHY_MESSAGE = (
+    "The geography you have requested is not available from Copernicus GLO-30"
+)
+MISSING_S3_OBJECT_ERROR_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 
 
 def copernicus_geocell(south: int, west: int) -> str:
@@ -106,6 +115,12 @@ def find_dem_object(
     return None
 
 
+def is_missing_s3_object_error(error: ClientError) -> bool:
+    error_code = str(error.response.get("Error", {}).get("Code", ""))
+    status_code = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return error_code in MISSING_S3_OBJECT_ERROR_CODES or status_code == 404
+
+
 def geocells_for_circle(
     longitude: float,
     latitude: float,
@@ -176,6 +191,15 @@ class S3TileService:
             radius_m,
             self.settings.coverage_boundary_sample_interval_degrees,
         )
+        restricted_tile_ids = sorted(
+            tile_id for tile_id in tile_ids if tile_id in self.settings.glo30_restricted_tile_ids
+        )
+        if restricted_tile_ids:
+            raise DemCoverageError(
+                RESTRICTED_GEOGRAPHY_MESSAGE,
+                log_detail=f"Restricted GLO-30 tile(s): {', '.join(restricted_tile_ids)}",
+            )
+
         paths: list[Path] = []
         for tile_id in tile_ids:
             paths.append(await self._get_tile(tile_id))
@@ -221,7 +245,10 @@ class S3TileService:
         longitude, latitude = geocell_center(tile_id)
         product_names = await self._catalogue_product_names(longitude, latitude)
         if not product_names:
-            raise TileDownloadError(f"No GLO-30 catalogue product covers {tile_id}")
+            raise DemCoverageError(
+                UNAVAILABLE_GEOGRAPHY_MESSAGE,
+                log_detail=f"No GLO-30 catalogue product covers {tile_id}",
+            )
 
         try:
             object_key = await asyncio.to_thread(
@@ -234,7 +261,10 @@ class S3TileService:
         except (BotoCoreError, ClientError) as exc:
             raise TileDownloadError(f"Unable to search Copernicus S3 for {tile_id}") from exc
         if object_key is None:
-            raise TileDownloadError(f"No GLO-30 DEM object was found for {tile_id}")
+            raise DemCoverageError(
+                UNAVAILABLE_GEOGRAPHY_MESSAGE,
+                log_detail=f"No GLO-30 DEM object was found for {tile_id}",
+            )
         return object_key
 
     async def _catalogue_product_names(
@@ -279,7 +309,18 @@ class S3TileService:
                 str(temporary),
             )
             os.replace(temporary, destination)
-        except (BotoCoreError, ClientError, OSError) as exc:
+        except ClientError as exc:
+            temporary.unlink(missing_ok=True)
+            if is_missing_s3_object_error(exc):
+                tile_id = destination.name.removesuffix("_DEM.tif")
+                raise DemCoverageError(
+                    UNAVAILABLE_GEOGRAPHY_MESSAGE,
+                    log_detail=f"No GLO-30 DEM object was found for {tile_id}",
+                ) from exc
+            raise TileDownloadError(
+                f"Unable to download GLO-30 tile for {Path(object_key).stem}"
+            ) from exc
+        except (BotoCoreError, OSError) as exc:
             temporary.unlink(missing_ok=True)
             raise TileDownloadError(
                 f"Unable to download GLO-30 tile for {Path(object_key).stem}"

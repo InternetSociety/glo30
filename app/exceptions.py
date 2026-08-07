@@ -1,6 +1,10 @@
 class ApplicationError(Exception):
     """Base class for errors that can be translated into an API response."""
 
+    def __init__(self, message: str, *, log_detail: str | None = None) -> None:
+        super().__init__(message)
+        self.log_detail = log_detail
+
 
 class DuplicateUserError(ApplicationError):
     pass

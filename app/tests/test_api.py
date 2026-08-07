@@ -1,9 +1,11 @@
+import logging
 from collections.abc import Awaitable, Callable
 
 import pytest
 from httpx import AsyncClient
 
 from app.dependencies import get_viewshed_service
+from app.exceptions import DemCoverageError
 from app.main import app
 from app.models.user import User
 from app.schemas.viewshed import (
@@ -48,6 +50,23 @@ REQUEST_BODY = {
     "target_height_agl_m": 0,
     "radius_m": 1000,
 }
+RESTRICTED_GEOGRAPHY_DETAIL = (
+    "The geography you have requested is not yet released to the public. Please visit "
+    "https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available "
+    "for more information"
+)
+UNAVAILABLE_GEOGRAPHY_DETAIL = (
+    "The geography you have requested is not available from Copernicus GLO-30"
+)
+
+
+class CoverageErrorViewshedService:
+    def __init__(self, detail: str, log_detail: str | None = None) -> None:
+        self.detail = detail
+        self.log_detail = log_detail
+
+    async def create(self, _request: ViewshedRequest) -> GeoJSONFeature:
+        raise DemCoverageError(self.detail, log_detail=self.log_detail)
 
 
 @pytest.mark.asyncio
@@ -78,3 +97,38 @@ async def test_viewshed_returns_typed_geojson(
     assert payload["properties"]["dem"] == "Copernicus GLO-30 DGED"
     assert payload["properties"]["observer_coordinates"] == [174.0, -39.0]
     assert payload["geometry"]["type"] == "Polygon"
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [RESTRICTED_GEOGRAPHY_DETAIL, UNAVAILABLE_GEOGRAPHY_DETAIL],
+)
+@pytest.mark.asyncio
+async def test_viewshed_coverage_error_is_returned_as_client_error(
+    client: AsyncClient,
+    create_test_user: Callable[..., Awaitable[User]],
+    detail: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    await create_test_user()
+    log_detail = "Affected tile: Copernicus_DSM_10_N40_00_E044_00"
+    app.dependency_overrides[get_viewshed_service] = lambda: CoverageErrorViewshedService(
+        detail,
+        log_detail,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        response = await client.post(
+            "/api/v1/viewsheds",
+            json=REQUEST_BODY,
+            headers={"Authorization": "Bearer test-bearer-token"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": detail}
+    assert caplog.record_tuples[-1] == (
+        "uvicorn.error",
+        logging.WARNING,
+        "Application error: POST /api/v1/viewsheds returned 422 "
+        f"(DemCoverageError): {detail}; {log_detail}",
+    )
