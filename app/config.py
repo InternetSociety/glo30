@@ -5,6 +5,39 @@ from typing import Literal, Self
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# These GLO-30 geocells are known to be withheld from public distribution. Keep the complete
+# Copernicus tile identifiers here so the service can reject them before attempting catalogue or
+# S3 access. This is a set because the source list attributes some geocells to both countries.
+GLO30_RESTRICTED_TILE_IDS = frozenset(
+    {
+        "Copernicus_DSM_10_N38_00_E045_00",
+        "Copernicus_DSM_10_N38_00_E046_00",
+        "Copernicus_DSM_10_N38_00_E048_00",
+        "Copernicus_DSM_10_N38_00_E049_00",
+        "Copernicus_DSM_10_N39_00_E044_00",
+        "Copernicus_DSM_10_N39_00_E045_00",
+        "Copernicus_DSM_10_N39_00_E046_00",
+        "Copernicus_DSM_10_N39_00_E047_00",
+        "Copernicus_DSM_10_N39_00_E048_00",
+        "Copernicus_DSM_10_N39_00_E049_00",
+        "Copernicus_DSM_10_N40_00_E043_00",
+        "Copernicus_DSM_10_N40_00_E044_00",
+        "Copernicus_DSM_10_N40_00_E045_00",
+        "Copernicus_DSM_10_N40_00_E046_00",
+        "Copernicus_DSM_10_N40_00_E047_00",
+        "Copernicus_DSM_10_N40_00_E048_00",
+        "Copernicus_DSM_10_N40_00_E049_00",
+        "Copernicus_DSM_10_N40_00_E050_00",
+        "Copernicus_DSM_10_N41_00_E043_00",
+        "Copernicus_DSM_10_N41_00_E044_00",
+        "Copernicus_DSM_10_N41_00_E045_00",
+        "Copernicus_DSM_10_N41_00_E046_00",
+        "Copernicus_DSM_10_N41_00_E047_00",
+        "Copernicus_DSM_10_N41_00_E048_00",
+        "Copernicus_DSM_10_N41_00_E049_00",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables and ``.env``."""
@@ -33,6 +66,7 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "eodata"
     copernicus_catalogue_url: str = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
     glo30_s3_prefix: str | None = None
+    glo30_restricted_tile_ids: frozenset[str] = GLO30_RESTRICTED_TILE_IDS
     tile_cache_expiry_days: int = 30
 
     # This interval is used only to sample the geodesic request boundary when selecting

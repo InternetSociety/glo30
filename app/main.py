@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from app.database import ensure_data_directories
 from app.dependencies import get_current_user
 from app.exceptions import (
+    ApplicationError,
     DemCoverageError,
     DuplicateUserError,
     InvalidUserOperationError,
@@ -24,7 +25,9 @@ from app.models.user import User
 from app.routers import auth, tile_cache, users, viewsheds
 from app.schemas.health import HealthResponse
 
-logger = logging.getLogger(__name__)
+# Uvicorn configures this logger with the same handler used for its server diagnostics, ensuring
+# application errors are visible beside the access log in container output.
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
@@ -118,10 +121,29 @@ def register_exception_handlers(application: FastAPI) -> None:
     for exception_type, status_code in mappings:
 
         async def handler(
-            _request: Request,
+            request: Request,
             exception: Exception,
             response_status: int = status_code,
         ) -> JSONResponse:
+            log_detail = (
+                exception.log_detail
+                if isinstance(exception, ApplicationError) and exception.log_detail
+                else None
+            )
+            diagnostic_suffix = f"; {log_detail}" if log_detail else ""
+            logger.log(
+                logging.ERROR if response_status >= 500 else logging.WARNING,
+                "Application error: %s %s returned %d (%s): %s%s",
+                request.method,
+                request.url.path,
+                response_status,
+                type(exception).__name__,
+                exception,
+                diagnostic_suffix,
+                exc_info=(type(exception), exception, exception.__traceback__)
+                if response_status >= 500
+                else None,
+            )
             return JSONResponse(status_code=response_status, content={"detail": str(exception)})
 
         application.add_exception_handler(exception_type, handler)

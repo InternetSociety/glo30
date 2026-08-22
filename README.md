@@ -55,6 +55,73 @@ simplification. By default, the output geometry budget is
 `geometry_min_vertex_budget` floor and `geometry_max_vertex_budget` ceiling. Small components may
 collapse during simplification when that is necessary to meet the budget.
 
+### Error handling
+
+A valid request whose required DEM tile is unavailable is reported as `422 Unprocessable Entity`,
+not as an upstream gateway failure. This allows API clients, including clients reaching the service
+through Cloudflare, to receive the application response instead of a proxy-generated `502` page.
+
+If a request intersects a tile known to be withheld from public distribution, the response is:
+
+```json
+{
+  "detail": "The geography you have requested is not yet released to the public. Please visit https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available for more information"
+}
+```
+
+If Copernicus has no GLO-30 catalogue product or DEM object for a tile that is not on the known
+restricted list, the response is:
+
+```json
+{
+  "detail": "The geography you have requested is not available from Copernicus GLO-30"
+}
+```
+
+Actual failures while contacting the Copernicus catalogue or S3 service remain `502 Bad Gateway`
+responses. Internal viewshed-processing failures remain `500 Internal Server Error` responses.
+Handled application errors are also written to the Uvicorn error log with the request method, path,
+status, exception type, and internal diagnostic context. For example:
+
+```text
+WARNING: Application error: POST /api/v1/viewsheds returned 422 (DemCoverageError): The geography you have requested is not available from Copernicus GLO-30; No GLO-30 catalogue product covers Copernicus_DSM_10_S40_00_E174_00
+```
+
+True `5xx` application errors include a traceback in the origin log.
+
+#### Known unavailable tiles
+
+The default `glo30_restricted_tile_ids` setting contains the following 25 unique geocells, covering
+parts of Armenia and Azerbaijan. Requests whose radius intersects any of these tiles receive the
+"not yet released to the public" response above. The compact code `N40E044`, for example,
+corresponds to the full Copernicus identifier `Copernicus_DSM_10_N40_00_E044_00`.
+
+- `N38E045`
+- `N38E046`
+- `N38E048`
+- `N38E049`
+- `N39E044`
+- `N39E045`
+- `N39E046`
+- `N39E047`
+- `N39E048`
+- `N39E049`
+- `N40E043`
+- `N40E044`
+- `N40E045`
+- `N40E046`
+- `N40E047`
+- `N40E048`
+- `N40E049`
+- `N40E050`
+- `N41E043`
+- `N41E044`
+- `N41E045`
+- `N41E046`
+- `N41E047`
+- `N41E048`
+- `N41E049`
+
 ### Output shape tuning
 
 All tuning values are environment-backed settings documented beside their defaults in

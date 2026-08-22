@@ -4,9 +4,10 @@ from typing import Any
 
 import httpx
 import pytest
+from botocore.exceptions import ClientError
 
 from app.config import Settings
-from app.exceptions import TileDownloadError
+from app.exceptions import DemCoverageError, TileDownloadError
 from app.models.cached_tile import CachedTile
 from app.services import s3_tiles
 from app.services.s3_tiles import (
@@ -25,6 +26,14 @@ TILE_ID = "Copernicus_DSM_10_S40_00_E174_00"
 OBJECT_KEY = (
     "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/26/"
     f"{PRODUCT_NAME}_abc123/{TILE_ID}/DEM/{TILE_ID}_DEM.tif"
+)
+RESTRICTED_GEOGRAPHY_DETAIL = (
+    "The geography you have requested is not yet released to the public. Please visit "
+    "https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available "
+    "for more information"
+)
+UNAVAILABLE_GEOGRAPHY_DETAIL = (
+    "The geography you have requested is not available from Copernicus GLO-30"
 )
 
 
@@ -66,6 +75,17 @@ class FakeS3Client:
                 return [{"Contents": [{"Key": key} for key in client.listed_keys]}]
 
         return FakePaginator()
+
+
+class MissingS3Client(FakeS3Client):
+    def download_file(self, bucket: str, key: str, filename: str) -> None:
+        raise ClientError(
+            {
+                "Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            },
+            "GetObject",
+        )
 
 
 def test_copernicus_geocell_uses_southwest_degree() -> None:
@@ -177,6 +197,63 @@ async def test_tile_service_downloads_then_reuses_cache(tmp_path: Path) -> None:
     assert len(s3_client.calls) == 1
     cached = next(iter(repository.tiles.values()))
     assert cached.last_used_at <= datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+async def test_restricted_tile_is_rejected_before_catalogue_or_s3_access(tmp_path: Path) -> None:
+    s3_client = FakeS3Client()
+    settings = Settings(
+        _env_file=None,
+        tile_cache_dir=tmp_path,
+        glo30_s3_prefix="product",
+    )
+    service = S3TileService(InMemoryTileRepository(), settings, s3_client)
+
+    with pytest.raises(DemCoverageError) as error:
+        await service.get_tiles(44.75263893480411, 40.11535693795821, 100)
+
+    assert str(error.value) == RESTRICTED_GEOGRAPHY_DETAIL
+    assert error.value.log_detail == ("Restricted GLO-30 tile(s): Copernicus_DSM_10_N40_00_E044_00")
+    assert s3_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_missing_catalogue_product_is_reported_as_unavailable(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={"value": []}))
+    settings = Settings(_env_file=None, tile_cache_dir=tmp_path, glo30_s3_prefix=None)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        service = S3TileService(
+            InMemoryTileRepository(),
+            settings,
+            FakeS3Client(),
+            client,
+        )
+        with pytest.raises(DemCoverageError) as error:
+            await service.get_tiles(174.5, -39.5, 100)
+
+    assert str(error.value) == UNAVAILABLE_GEOGRAPHY_DETAIL
+    assert error.value.log_detail == (
+        "No GLO-30 catalogue product covers Copernicus_DSM_10_S40_00_E174_00"
+    )
+
+
+@pytest.mark.asyncio
+async def test_missing_direct_s3_object_is_reported_as_unavailable(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        tile_cache_dir=tmp_path,
+        glo30_s3_prefix="product",
+    )
+    service = S3TileService(InMemoryTileRepository(), settings, MissingS3Client())
+
+    with pytest.raises(DemCoverageError) as error:
+        await service.get_tiles(174.5, -39.5, 100)
+
+    assert str(error.value) == UNAVAILABLE_GEOGRAPHY_DETAIL
+    assert error.value.log_detail == (
+        "No GLO-30 DEM object was found for Copernicus_DSM_10_S40_00_E174_00"
+    )
 
 
 @pytest.mark.asyncio
