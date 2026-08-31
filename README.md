@@ -3,6 +3,7 @@
 This FastAPI service returns a terrain viewshed as a GeoJSON `Feature`. It downloads the
 required Copernicus GLO-30 DGED tiles from the Copernicus Data Space Ecosystem S3 service,
 caches them locally, and performs each calculation in a local metre-based projection.
+The supported runtime is CPython 3.14 in Docker Compose.
 
 ## Attribution
 
@@ -209,6 +210,7 @@ s3_secret_key = ...
 s3_host_base = eodata.dataspace.copernicus.eu
 s3_host_bucket = eodata.dataspace.copernicus.eu
 secret_key = a-long-random-deployment-secret
+cookie_secure = true
 ```
 
 `s3_host_bucket` is retained for compatibility with the supplied configuration; the actual S3

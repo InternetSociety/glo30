@@ -3,6 +3,7 @@ import math
 import os
 import re
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -212,13 +213,14 @@ class S3TileService:
         destination = self.settings.tile_cache_dir / f"{tile_id}_DEM.tif"
         cached = await self.repository.get_by_tile_id(tile_id)
 
-        if cached and self._as_utc(cached.expires_at) >= now and Path(cached.file_path).is_file():
-            cached.last_used_at = now
-            cached.expires_at = expires_at
-            return Path(cached.file_path)
+        if cached and self._as_utc(cached.expires_at) >= now:
+            cached_path = Path(cached.file_path)
+            if await asyncio.to_thread(cached_path.is_file):
+                cached.last_used_at = now
+                cached.expires_at = expires_at
+                return cached_path
 
         object_key = cached.object_key if cached else await self._resolve_object_key(tile_id)
-        self.settings.tile_cache_dir.mkdir(parents=True, exist_ok=True)
         await self._download(object_key, destination)
 
         if cached:
@@ -251,9 +253,10 @@ class S3TileService:
             )
 
         try:
+            s3_client = await self._get_s3_client()
             object_key = await asyncio.to_thread(
                 find_dem_object,
-                self.s3_client,
+                s3_client,
                 self.settings.s3_bucket_name,
                 product_names,
                 tile_id,
@@ -302,15 +305,16 @@ class S3TileService:
     async def _download(self, object_key: str, destination: Path) -> None:
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
         try:
+            s3_client = await self._get_s3_client()
             await asyncio.to_thread(
-                self.s3_client.download_file,
+                self._download_file,
+                s3_client,
                 self.settings.s3_bucket_name,
                 object_key,
-                str(temporary),
+                temporary,
+                destination,
             )
-            os.replace(temporary, destination)
         except ClientError as exc:
-            temporary.unlink(missing_ok=True)
             if is_missing_s3_object_error(exc):
                 tile_id = destination.name.removesuffix("_DEM.tif")
                 raise DemCoverageError(
@@ -321,7 +325,6 @@ class S3TileService:
                 f"Unable to download GLO-30 tile for {Path(object_key).stem}"
             ) from exc
         except (BotoCoreError, OSError) as exc:
-            temporary.unlink(missing_ok=True)
             raise TileDownloadError(
                 f"Unable to download GLO-30 tile for {Path(object_key).stem}"
             ) from exc
@@ -329,26 +332,44 @@ class S3TileService:
     async def _remove_expired_tiles(self) -> None:
         now = datetime.now(UTC)
         for tile in await self.repository.list_expired(now):
-            Path(tile.file_path).unlink(missing_ok=True)
+            await asyncio.to_thread(Path(tile.file_path).unlink, missing_ok=True)
             await self.repository.delete(tile)
 
-    @property
-    def s3_client(self) -> Any:
+    @staticmethod
+    def _download_file(
+        s3_client: Any,
+        bucket_name: str,
+        object_key: str,
+        temporary: Path,
+        destination: Path,
+    ) -> None:
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            s3_client.download_file(bucket_name, object_key, str(temporary))
+            os.replace(temporary, destination)
+        finally:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+    async def _get_s3_client(self) -> Any:
         if self._s3_client is None:
-            if self.settings.s3_access_key is None or self.settings.s3_secret_key is None:
-                raise TileDownloadError("Copernicus S3 credentials are not configured")
-            self._s3_client = boto3.client(
-                "s3",
-                endpoint_url=self.settings.s3_endpoint_url,
-                aws_access_key_id=self.settings.s3_access_key.get_secret_value(),
-                aws_secret_access_key=self.settings.s3_secret_key.get_secret_value(),
-                region_name="default",
-                config=Config(
-                    signature_version="s3v4",
-                    retries={"max_attempts": 5, "mode": "standard"},
-                ),
-            )
+            self._s3_client = await asyncio.to_thread(self._create_s3_client)
         return self._s3_client
+
+    def _create_s3_client(self) -> Any:
+        if self.settings.s3_access_key is None or self.settings.s3_secret_key is None:
+            raise TileDownloadError("Copernicus S3 credentials are not configured")
+        return boto3.client(
+            "s3",
+            endpoint_url=self.settings.s3_endpoint_url,
+            aws_access_key_id=self.settings.s3_access_key.get_secret_value(),
+            aws_secret_access_key=self.settings.s3_secret_key.get_secret_value(),
+            region_name="default",
+            config=Config(
+                signature_version="s3v4",
+                retries={"max_attempts": 5, "mode": "standard"},
+            ),
+        )
 
     @staticmethod
     def _as_utc(value: datetime) -> datetime:

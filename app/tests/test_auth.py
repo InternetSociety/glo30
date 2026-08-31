@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.services.auth import SESSION_COOKIE_NAME
+from app.services.auth import CSRF_COOKIE_NAME, SESSION_COOKIE_NAME
 
 
 @pytest.mark.asyncio
@@ -53,10 +53,15 @@ async def test_web_login_uses_an_app_specific_session_cookie(
         is_admin=True,
     )
     client.cookies.set("access_token", "another-local-application-session")
+    await client.get("/")
 
     login = await client.post(
         "/login",
-        data={"username": "admin@example.com", "password": "correct-horse"},
+        data={
+            "username": "admin@example.com",
+            "password": "correct-horse",
+            "csrf_token": client.cookies[CSRF_COOKIE_NAME],
+        },
     )
     home = await client.get("/")
 
@@ -77,15 +82,24 @@ async def test_admin_can_create_user_from_management_ui(
         bearer_token=None,
         is_admin=True,
     )
+    await client.get("/")
     login = await client.post(
         "/login",
-        data={"username": "admin@example.com", "password": "correct-horse"},
+        data={
+            "username": "admin@example.com",
+            "password": "correct-horse",
+            "csrf_token": client.cookies[CSRF_COOKIE_NAME],
+        },
     )
     assert SESSION_COOKIE_NAME in login.cookies
 
     response = await client.post(
         "/users/create",
-        data={"email": "new@example.com", "password": "long-enough-password"},
+        data={
+            "email": "new@example.com",
+            "password": "long-enough-password",
+            "csrf_token": client.cookies[CSRF_COOKIE_NAME],
+        },
     )
 
     assert response.status_code == 303

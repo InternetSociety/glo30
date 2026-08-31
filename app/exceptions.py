@@ -18,6 +18,14 @@ class InvalidUserOperationError(ApplicationError):
     pass
 
 
+class InvalidCredentialsError(ApplicationError):
+    pass
+
+
+class InactiveUserError(ApplicationError):
+    pass
+
+
 class RadiusLimitError(ApplicationError):
     pass
 

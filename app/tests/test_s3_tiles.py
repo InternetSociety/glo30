@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -197,6 +198,52 @@ async def test_tile_service_downloads_then_reuses_cache(tmp_path: Path) -> None:
     assert len(s3_client.calls) == 1
     cached = next(iter(repository.tiles.values()))
     assert cached.last_used_at <= datetime.now(UTC)
+
+
+@pytest.mark.asyncio
+async def test_tile_service_moves_file_work_to_threads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = InMemoryTileRepository()
+    expired_path = tmp_path / "expired.tif"
+    expired_path.write_bytes(b"expired")
+    expired_tile = CachedTile(
+        tile_id="expired",
+        object_key="expired",
+        file_path=str(expired_path),
+        last_used_at=datetime.now(UTC) - timedelta(days=2),
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    repository.tiles[expired_tile.tile_id] = expired_tile
+    calls: list[str] = []
+    original_to_thread = asyncio.to_thread
+
+    async def recording_to_thread(function: Any, /, *args: Any, **kwargs: Any) -> Any:
+        calls.append(function.__name__)
+        return await original_to_thread(function, *args, **kwargs)
+
+    monkeypatch.setattr(s3_tiles.asyncio, "to_thread", recording_to_thread)
+    s3_client = FakeS3Client()
+    monkeypatch.setattr(s3_tiles.boto3, "client", lambda *_args, **_kwargs: s3_client)
+    settings = Settings(
+        _env_file=None,
+        tile_cache_dir=tmp_path,
+        data_dir=tmp_path,
+        glo30_s3_prefix="product",
+        s3_access_key="access-key",
+        s3_secret_key="secret-key",
+    )
+    service = S3TileService(repository, settings)
+
+    await service.get_tiles(174.5, -39.5, 100)
+    await service.get_tiles(174.5, -39.5, 100)
+
+    assert "_create_s3_client" in calls
+    assert "_download_file" in calls
+    assert "is_file" in calls
+    assert "unlink" in calls
+    assert not expired_path.exists()
 
 
 @pytest.mark.asyncio

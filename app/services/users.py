@@ -1,15 +1,18 @@
+import asyncio
 import secrets
 from datetime import UTC, datetime
 
 from app.exceptions import (
     DuplicateUserError,
+    InactiveUserError,
+    InvalidCredentialsError,
     InvalidUserOperationError,
     UserNotFoundError,
 )
 from app.models.user import User
 from app.repositories.users import UserRepository
 from app.schemas.user import UserCreate
-from app.services.auth import hash_password
+from app.services.auth import hash_password, verify_password
 
 
 class UserService:
@@ -23,7 +26,7 @@ class UserService:
 
         user = User(
             email=normalized_email,
-            password_hash=hash_password(user_create.password),
+            password_hash=await asyncio.to_thread(hash_password, user_create.password),
             bearer_token=None if user_create.is_admin else self._new_bearer_token(),
             is_active=True,
             is_admin=user_create.is_admin,
@@ -39,6 +42,22 @@ class UserService:
             raise UserNotFoundError("User not found")
         return user
 
+    async def authenticate(self, email: str, password: str) -> User:
+        user = await self.repository.get_by_email(email.lower())
+        if user is None or not await asyncio.to_thread(
+            verify_password,
+            password,
+            user.password_hash,
+        ):
+            raise InvalidCredentialsError("Incorrect email or password")
+        if not user.is_active:
+            raise InactiveUserError("Inactive user")
+        user.last_login_at = datetime.now(UTC)
+        return user
+
+    async def list_visible_to(self, current_user: User) -> list[User]:
+        return await self.repository.list_all() if current_user.is_admin else [current_user]
+
     async def regenerate_token(self, user_id: int) -> User:
         user = await self.get(user_id)
         if user.is_admin:
@@ -50,6 +69,8 @@ class UserService:
         user = await self.get(user_id)
         if user.id == acting_user.id:
             raise InvalidUserOperationError("You cannot deactivate your own account")
+        if user.is_admin and user.is_active:
+            await self._ensure_not_last_active_admin()
         user.is_active = not user.is_active
         return user
 
@@ -57,6 +78,8 @@ class UserService:
         user = await self.get(user_id)
         if user.id == acting_user.id:
             raise InvalidUserOperationError("You cannot change your own admin status")
+        if user.is_admin and user.is_active:
+            await self._ensure_not_last_active_admin()
         user.is_admin = not user.is_admin
         user.bearer_token = None if user.is_admin else self._new_bearer_token()
         return user
@@ -65,10 +88,22 @@ class UserService:
         user = await self.get(user_id)
         if user.id == acting_user.id:
             raise InvalidUserOperationError("You cannot delete your own account")
+        if user.is_admin and user.is_active:
+            await self._ensure_not_last_active_admin()
         await self.repository.delete(user)
 
-    async def mark_login(self, user: User) -> None:
-        user.last_login_at = datetime.now(UTC)
+    async def remove_by_email(self, email: str) -> User:
+        user = await self.repository.get_by_email(email.lower())
+        if user is None:
+            raise UserNotFoundError("User not found")
+        if user.is_admin and user.is_active:
+            await self._ensure_not_last_active_admin()
+        await self.repository.delete(user)
+        return user
+
+    async def _ensure_not_last_active_admin(self) -> None:
+        if await self.repository.count_active_admins() <= 1:
+            raise InvalidUserOperationError("The last active administrator cannot be changed")
 
     @staticmethod
     def _new_bearer_token() -> str:
