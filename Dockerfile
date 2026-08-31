@@ -1,12 +1,11 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/usr/lib/python3/dist-packages
+    PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y gdal-bin python3-rasterio \
+    && apt-get install --no-install-recommends -y gdal-bin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

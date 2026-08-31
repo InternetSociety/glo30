@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cached_tile import CachedTile
 from app.models.user import User
+from app.services.auth import CSRF_COOKIE_NAME
 
 
 async def add_cached_tile(
@@ -31,7 +32,7 @@ async def add_cached_tile(
 async def test_tile_cache_requires_authentication(client: AsyncClient) -> None:
     response = await client.get("/tile-cache")
 
-    assert response.status_code == 307
+    assert response.status_code == 303
     assert response.headers["location"] == "/"
 
 
@@ -59,22 +60,17 @@ async def test_regular_user_can_view_cached_tiles(
     home = await client.get("/", headers=headers)
 
     assert response.status_code == 200
-    assert "Tile Cache" in response.text
-    assert "user@example.com" in response.text
+    assert "Tile cache" in response.text
     assert newer.tile_id in response.text
     assert newer.object_key in response.text
     assert newer.file_path in response.text
     assert response.text.index(newer.tile_id) < response.text.index(older.tile_id)
     assert 'href="/tile-cache"' in home.text
-    menu_labels = [
-        "User Management",
-        "Application Documentation",
-        "API Documentation (/docs)",
-        "Tile Cache",
-    ]
-    assert all(label in home.text for label in menu_labels)
-    assert [home.text.index(label) for label in menu_labels] == sorted(
-        home.text.index(label) for label in menu_labels
+    menu_labels = [">API<", ">Guide<", ">Users<", ">Tile cache<", ">Sign out<"]
+    navigation = home.text[home.text.index("<nav") : home.text.index("</nav>")]
+    assert all(label in navigation for label in menu_labels)
+    assert [navigation.index(label) for label in menu_labels] == sorted(
+        navigation.index(label) for label in menu_labels
     )
 
 
@@ -89,13 +85,18 @@ async def test_admin_user_can_view_tile_cache(
         bearer_token=None,
         is_admin=True,
     )
+    await client.get("/")
     await client.post(
         "/login",
-        data={"username": "admin@example.com", "password": "correct-horse"},
+        data={
+            "username": "admin@example.com",
+            "password": "correct-horse",
+            "csrf_token": client.cookies[CSRF_COOKIE_NAME],
+        },
     )
 
     response = await client.get("/tile-cache")
 
     assert response.status_code == 200
-    assert "admin@example.com" in response.text
+    assert 'class="navbar navbar-expand-lg bg-dark navbar-dark"' in response.text
     assert "No tiles are currently cached." in response.text

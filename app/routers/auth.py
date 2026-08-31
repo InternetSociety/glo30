@@ -7,15 +7,23 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
-from app.dependencies import get_current_active_user, get_current_user
+from app.dependencies import (
+    get_current_active_user,
+    get_current_user,
+    get_user_service,
+    verify_csrf_token,
+)
+from app.exceptions import InactiveUserError, InvalidCredentialsError
 from app.models.user import User
-from app.repositories.users import UserRepository
-from app.schemas.auth import TokenResponse
-from app.services.auth import SESSION_COOKIE_NAME, create_access_token, verify_password
+from app.schemas.auth import TokenResponse, UserCredentials
+from app.services.auth import (
+    CSRF_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    create_access_token,
+    create_csrf_token,
+)
 from app.services.users import UserService
 
 router = APIRouter(tags=["Authentication and UI"])
@@ -27,30 +35,57 @@ async def home(
     request: Request,
     user: Annotated[User | None, Depends(get_current_user)],
 ) -> HTMLResponse:
-    return templates.TemplateResponse(request=request, name="index.html", context={"user": user})
+    csrf_token = request.cookies.get(CSRF_COOKIE_NAME) or create_csrf_token()
+    response = templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"current_user": user, "csrf_token": csrf_token},
+    )
+    if CSRF_COOKIE_NAME not in request.cookies:
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            csrf_token,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+            max_age=settings.access_token_expire_minutes * 60,
+            path="/",
+        )
+    return response
 
 
 @router.post("/login", response_class=RedirectResponse, include_in_schema=False)
 async def login(
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    service: Annotated[UserService, Depends(get_user_service)],
+    _csrf: Annotated[None, Depends(verify_csrf_token)],
 ) -> RedirectResponse:
-    repository = UserRepository(db)
-    user = await repository.get_by_email(username.lower())
-    if user is None or not verify_password(password, user.password_hash):
+    try:
+        credentials = UserCredentials(email=username, password=password)
+        user = await service.authenticate(str(credentials.email), credentials.password)
+    except InvalidCredentialsError:
         return RedirectResponse(
             url="/?error=invalid_credentials",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    if not user.is_active:
+    except InactiveUserError:
         return RedirectResponse(url="/?error=inactive", status_code=status.HTTP_303_SEE_OTHER)
 
-    await UserService(repository).mark_login(user)
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=create_access_token(user.email, settings),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
+    csrf_token = create_csrf_token()
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
@@ -63,38 +98,73 @@ async def login(
 @router.post("/token", response_model=TokenResponse)
 async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    service: Annotated[UserService, Depends(get_user_service)],
 ) -> TokenResponse:
-    repository = UserRepository(db)
-    user = await repository.get_by_email(form_data.username.lower())
-    if user is None or not verify_password(form_data.password, user.password_hash):
+    credentials = UserCredentials(email=form_data.username, password=form_data.password)
+    try:
+        user = await service.authenticate(str(credentials.email), credentials.password)
+    except InvalidCredentialsError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
-    await UserService(repository).mark_login(user)
+        ) from exc
+    except InactiveUserError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user",
+        ) from exc
     return TokenResponse(access_token=create_access_token(user.email, settings))
 
 
 @router.post("/logout", response_class=RedirectResponse, include_in_schema=False)
-async def logout() -> RedirectResponse:
+async def logout(
+    _current_user: Annotated[User, Depends(get_current_active_user)],
+    _csrf: Annotated[None, Depends(verify_csrf_token)],
+) -> RedirectResponse:
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        CSRF_COOKIE_NAME,
+        path="/",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
     return response
 
 
 @router.get("/app-docs", response_class=HTMLResponse, include_in_schema=False)
 async def application_documentation(
     request: Request,
-    _current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> HTMLResponse:
     readme = await asyncio.to_thread(Path("README.md").read_text, encoding="utf-8")
     content = markdown.markdown(readme, extensions=["fenced_code", "tables"])
-    return templates.TemplateResponse(
+    csrf_token = request.cookies.get(CSRF_COOKIE_NAME) or create_csrf_token()
+    response = templates.TemplateResponse(
         request=request,
         name="app_docs.html",
-        context={"content": content},
+        context={
+            "content": content,
+            "csrf_token": csrf_token,
+            "current_user": current_user,
+        },
     )
+    if CSRF_COOKIE_NAME not in request.cookies:
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            csrf_token,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+            max_age=settings.access_token_expire_minutes * 60,
+            path="/",
+        )
+    return response

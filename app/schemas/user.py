@@ -14,8 +14,11 @@ class UserResponse(BaseModel):
 
     id: int
     email: EmailStr
-    bearer_token: str | None
     is_active: bool
     is_admin: bool
     created_at: datetime
     last_login_at: datetime | None
+
+
+class UserCredentialResponse(UserResponse):
+    bearer_token: str

@@ -1,16 +1,19 @@
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from html import escape
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.config import settings
 from app.database import ensure_data_directories
-from app.dependencies import get_current_user
+from app.dependencies import get_current_active_user, get_current_user
 from app.exceptions import (
     ApplicationError,
     DemCoverageError,
@@ -24,6 +27,7 @@ from app.exceptions import (
 from app.models.user import User
 from app.routers import auth, tile_cache, users, viewsheds
 from app.schemas.health import HealthResponse
+from app.services.auth import CSRF_COOKIE_NAME, create_csrf_token
 
 # Uvicorn configures this logger with the same handler used for its server diagnostics, ensuring
 # application errors are visible beside the access log in container output.
@@ -32,7 +36,7 @@ logger = logging.getLogger("uvicorn.error")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    ensure_data_directories()
+    await asyncio.to_thread(ensure_data_directories)
     yield
 
 
@@ -53,23 +57,23 @@ def create_app() -> FastAPI:
     application.include_router(viewsheds.router)
     register_exception_handlers(application)
 
-    @application.get("/health", response_model=HealthResponse, tags=["Operations"])
-    async def health() -> HealthResponse:
+    @application.get("/api/v1/health", response_model=HealthResponse, tags=["Operations"])
+    async def health(
+        _current_user: Annotated[User, Depends(get_current_active_user)],
+    ) -> HealthResponse:
         return HealthResponse()
 
     @application.get("/docs", include_in_schema=False)
     async def custom_swagger_ui(
-        current_user: Annotated[User | None, Depends(get_current_user)],
-    ) -> Response:
-        if current_user is None:
-            return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
+        request: Request,
+        current_user: Annotated[User, Depends(get_current_active_user)],
+    ) -> HTMLResponse:
         html = get_swagger_ui_html(
             openapi_url="/openapi.json",
             title=f"{application.title} - Swagger UI",
             swagger_ui_parameters=application.swagger_ui_parameters,
         )
-        bearer_token = current_user.bearer_token
+        bearer_token = None if current_user.is_admin else current_user.bearer_token
         injection = ""
         if bearer_token:
             encoded_token = json.dumps(bearer_token)
@@ -85,17 +89,52 @@ window.addEventListener('load', function () {{
 }});
 </script>
 """
-        back_link = (
-            '<p style="position:fixed;top:8px;left:8px;z-index:9999"><a href="/">Home</a></p>'
+        csrf_token = request.cookies.get(CSRF_COOKIE_NAME) or create_csrf_token()
+        navigation = (
+            '<nav class="navbar navbar-expand-lg bg-dark navbar-dark">'
+            '<div class="container">'
+            '<a class="navbar-brand" href="/">Copernicus GLO-30 Viewshed API</a>'
+            '<div class="navbar-nav ms-auto flex-row gap-3">'
+            '<a class="nav-link" href="/docs">API</a>'
+            '<a class="nav-link" href="/app-docs">Guide</a>'
+            '<a class="nav-link" href="/manage-users">Users</a>'
+            '<a class="nav-link" href="/tile-cache">Tile cache</a>'
+            '<form action="/logout" method="post">'
+            f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
+            '<button class="btn btn-link nav-link" type="submit">Sign out</button>'
+            "</form></div></div></nav>"
         )
-        return HTMLResponse(bytes(html.body).decode("utf-8") + injection + back_link)
+        body = bytes(html.body).decode("utf-8")
+        body = body.replace(
+            "</head>",
+            '<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" '
+            'rel="stylesheet"></head>',
+            1,
+        ).replace("<body>", f"<body>{navigation}", 1)
+        response = HTMLResponse(body + injection)
+        if CSRF_COOKIE_NAME not in request.cookies:
+            response.set_cookie(
+                CSRF_COOKIE_NAME,
+                csrf_token,
+                httponly=True,
+                secure=settings.cookie_secure,
+                samesite="lax",
+                max_age=settings.access_token_expire_minutes * 60,
+                path="/",
+            )
+        return response
 
     @application.get("/openapi.json", include_in_schema=False)
     async def openapi_document(
         current_user: Annotated[User | None, Depends(get_current_user)],
     ) -> JSONResponse:
         if current_user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not current_user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
         schema = get_openapi(
             title=application.title,
             version=application.version,
@@ -112,8 +151,8 @@ def register_exception_handlers(application: FastAPI) -> None:
         (DuplicateUserError, status.HTTP_409_CONFLICT),
         (UserNotFoundError, status.HTTP_404_NOT_FOUND),
         (InvalidUserOperationError, status.HTTP_400_BAD_REQUEST),
-        (RadiusLimitError, status.HTTP_422_UNPROCESSABLE_ENTITY),
-        (DemCoverageError, status.HTTP_422_UNPROCESSABLE_ENTITY),
+        (RadiusLimitError, status.HTTP_422_UNPROCESSABLE_CONTENT),
+        (DemCoverageError, status.HTTP_422_UNPROCESSABLE_CONTENT),
         (TileDownloadError, status.HTTP_502_BAD_GATEWAY),
         (ViewshedProcessingError, status.HTTP_500_INTERNAL_SERVER_ERROR),
     ]

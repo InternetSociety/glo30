@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, Form, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,8 +9,14 @@ from app.database import get_db
 from app.models.user import User
 from app.repositories.cached_tiles import CachedTileRepository
 from app.repositories.users import UserRepository
-from app.services.auth import SESSION_COOKIE_NAME, decode_access_token
+from app.services.auth import (
+    CSRF_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    csrf_token_is_valid,
+    decode_access_token,
+)
 from app.services.s3_tiles import S3TileService
+from app.services.tile_cache import TileCacheService
 from app.services.users import UserService
 from app.services.viewshed import ViewshedProcessor, ViewshedService
 
@@ -51,7 +57,7 @@ async def get_current_active_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         raise HTTPException(
-            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            status_code=status.HTTP_303_SEE_OTHER,
             headers={"Location": "/"},
         )
     if not current_user.is_active:
@@ -74,6 +80,20 @@ def get_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> UserServic
     return UserService(UserRepository(db))
 
 
+def get_tile_cache_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TileCacheService:
+    return TileCacheService(CachedTileRepository(db))
+
+
 def get_viewshed_service(db: Annotated[AsyncSession, Depends(get_db)]) -> ViewshedService:
     tile_service = S3TileService(CachedTileRepository(db), settings)
     return ViewshedService(tile_service, ViewshedProcessor(settings), settings)
+
+
+async def verify_csrf_token(
+    request: Request,
+    csrf_token: Annotated[str | None, Form()] = None,
+) -> None:
+    if not csrf_token_is_valid(request.cookies.get(CSRF_COOKIE_NAME), csrf_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")

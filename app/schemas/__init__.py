@@ -1,5 +1,5 @@
-from app.schemas.auth import TokenResponse
-from app.schemas.user import UserCreate, UserResponse
+from app.schemas.auth import TokenResponse, UserCredentials
+from app.schemas.user import UserCreate, UserCredentialResponse, UserResponse
 from app.schemas.viewshed import (
     GeoJSONFeature,
     GeoJSONGeometry,
@@ -12,6 +12,8 @@ __all__ = [
     "GeoJSONGeometry",
     "TokenResponse",
     "UserCreate",
+    "UserCredentialResponse",
+    "UserCredentials",
     "UserResponse",
     "ViewshedProperties",
     "ViewshedRequest",

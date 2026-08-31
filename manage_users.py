@@ -1,11 +1,8 @@
 import argparse
 import asyncio
 
-from sqlalchemy import select
-
 from app.database import AsyncSessionLocal, ensure_data_directories
-from app.exceptions import DuplicateUserError
-from app.models.user import User
+from app.exceptions import DuplicateUserError, InvalidUserOperationError, UserNotFoundError
 from app.repositories.users import UserRepository
 from app.services.users import UserService
 
@@ -23,12 +20,12 @@ async def create_admin(email: str, password: str) -> None:
 
 async def remove_user(email: str) -> None:
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(User).where(User.email == email.lower()))
-        user = result.scalar_one_or_none()
-        if user is None:
-            raise SystemExit(f"User {email} does not exist")
-        await session.delete(user)
-        await session.commit()
+        try:
+            await UserService(UserRepository(session)).remove_by_email(email)
+            await session.commit()
+        except (UserNotFoundError, InvalidUserOperationError) as exc:
+            await session.rollback()
+            raise SystemExit(str(exc)) from None
     print(f"Removed user {email.lower()}")
 
 
