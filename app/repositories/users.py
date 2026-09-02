@@ -19,6 +19,10 @@ class UserRepository:
         result = await self.db.execute(select(User).where(User.bearer_token == token))
         return result.scalar_one_or_none()
 
+    async def get_by_reset_token_hash(self, token_hash: str) -> User | None:
+        result = await self.db.execute(select(User).where(User.reset_token_hash == token_hash))
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[User]:
         result = await self.db.execute(select(User).order_by(User.email))
         return list(result.scalars().all())

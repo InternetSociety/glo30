@@ -26,6 +26,10 @@ class InactiveUserError(ApplicationError):
     pass
 
 
+class InvalidPasswordResetCodeError(ApplicationError):
+    pass
+
+
 class RadiusLimitError(ApplicationError):
     pass
 

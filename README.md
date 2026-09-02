@@ -176,6 +176,7 @@ catalogue discovery by setting `glo30_s3_prefix`; that prefix must use this layo
 - Administrators create, activate, promote, and remove users at `/manage-users`.
 - Each non-admin user receives a persistent bearer token. An administrator can regenerate it.
 - JWT cookies authenticate web sessions. Persistent user tokens authenticate API requests.
+- Users can request a 30-minute, single-use password-reset code from `/forgot-password`.
 - Every active user can inspect the current GLO-30 tile inventory at `/tile-cache`.
 - `/docs` and `/openapi.json` are available only after sign-in. Swagger is pre-authorised with
   the signed-in regular user's bearer token.
@@ -211,7 +212,14 @@ s3_host_base = eodata.dataspace.copernicus.eu
 s3_host_bucket = eodata.dataspace.copernicus.eu
 secret_key = a-long-random-deployment-secret
 cookie_secure = true
+smtp_enabled = true
+smtp_host = mail.example.com
+smtp_port = 25
+smtp_from = no-reply@example.com
 ```
+
+Password-reset email is disabled by default. When enabled, the application sends reset codes over
+SMTP without blocking the async request loop. It does not store the plain reset code.
 
 `s3_host_bucket` is retained for compatibility with the supplied configuration; the actual S3
 bucket name defaults to `eodata` and can be changed with `s3_bucket_name`.
