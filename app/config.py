@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24 * 7
     cookie_secure: bool = False
 
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = Field(default=25, ge=1, le=65535)
+    smtp_from: str = ""
+
     s3_access_key: SecretStr | None = None
     s3_secret_key: SecretStr | None = None
     s3_host_base: str = "eodata.dataspace.copernicus.eu"
@@ -129,6 +134,12 @@ class Settings(BaseSettings):
                 "geometry_max_vertex_budget must be greater than or equal to "
                 "geometry_min_vertex_budget"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_smtp_configuration(self) -> Self:
+        if self.smtp_enabled and (not self.smtp_host or not self.smtp_from):
+            raise ValueError("smtp_host and smtp_from are required when SMTP is enabled")
         return self
 
     @property

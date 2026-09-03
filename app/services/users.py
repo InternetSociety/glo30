@@ -1,11 +1,16 @@
 import asyncio
+import hashlib
+import logging
 import secrets
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
+from app.config import Settings, settings
 from app.exceptions import (
     DuplicateUserError,
     InactiveUserError,
     InvalidCredentialsError,
+    InvalidPasswordResetCodeError,
     InvalidUserOperationError,
     UserNotFoundError,
 )
@@ -13,11 +18,23 @@ from app.models.user import User
 from app.repositories.users import UserRepository
 from app.schemas.user import UserCreate
 from app.services.auth import hash_password, verify_password
+from app.services.email import send_password_reset
+
+logger = logging.getLogger("uvicorn.error")
+PASSWORD_RESET_EXPIRY = timedelta(minutes=30)
+PasswordResetSender = Callable[[str, str, Settings], None]
 
 
 class UserService:
-    def __init__(self, repository: UserRepository) -> None:
+    def __init__(
+        self,
+        repository: UserRepository,
+        app_settings: Settings = settings,
+        password_reset_sender: PasswordResetSender = send_password_reset,
+    ) -> None:
         self.repository = repository
+        self.settings = app_settings
+        self.password_reset_sender = password_reset_sender
 
     async def create(self, user_create: UserCreate) -> User:
         normalized_email = user_create.email.lower()
@@ -53,6 +70,39 @@ class UserService:
         if not user.is_active:
             raise InactiveUserError("Inactive user")
         user.last_login_at = datetime.now(UTC)
+        return user
+
+    async def request_password_reset(self, email: str) -> None:
+        user = await self.repository.get_by_email(email.lower())
+        if user is None or not user.is_active or not self.settings.smtp_enabled:
+            return
+
+        reset_code = secrets.token_urlsafe(48)
+        user.reset_token_hash = self._reset_token_digest(reset_code)
+        user.reset_token_expires_at = datetime.now(UTC) + PASSWORD_RESET_EXPIRY
+        try:
+            await asyncio.to_thread(
+                self.password_reset_sender,
+                user.email,
+                reset_code,
+                self.settings,
+            )
+        except Exception as exc:
+            user.reset_token_hash = None
+            user.reset_token_expires_at = None
+            logger.warning(
+                "Password reset email delivery failed (%s)",
+                type(exc).__name__,
+            )
+
+    async def reset_password(self, reset_code: str, new_password: str) -> User:
+        user = await self.repository.get_by_reset_token_hash(self._reset_token_digest(reset_code))
+        if user is None or not user.is_active or self._reset_code_has_expired(user):
+            raise InvalidPasswordResetCodeError("The reset code is invalid or expired")
+
+        user.password_hash = await asyncio.to_thread(hash_password, new_password)
+        user.reset_token_hash = None
+        user.reset_token_expires_at = None
         return user
 
     async def list_visible_to(self, current_user: User) -> list[User]:
@@ -108,3 +158,16 @@ class UserService:
     @staticmethod
     def _new_bearer_token() -> str:
         return secrets.token_urlsafe(32)
+
+    @staticmethod
+    def _reset_token_digest(reset_code: str) -> str:
+        return hashlib.sha256(reset_code.encode()).hexdigest()
+
+    @staticmethod
+    def _reset_code_has_expired(user: User) -> bool:
+        if user.reset_token_expires_at is None:
+            return True
+        expires_at = user.reset_token_expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return expires_at <= datetime.now(UTC)
