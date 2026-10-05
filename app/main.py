@@ -1,15 +1,18 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from html import escape
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import ensure_data_directories
@@ -58,6 +61,25 @@ def create_app() -> FastAPI:
     application.include_router(tile_cache.router)
     application.include_router(viewsheds.router)
     register_exception_handlers(application)
+
+    @application.middleware("http")
+    async def log_unhandled_error_responses(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        if response.status_code >= 400 and not getattr(request.state, "failure_logged", False):
+            endpoint = request.scope.get("endpoint")
+            endpoint_name = getattr(endpoint, "__qualname__", "unmatched route")
+            logger.log(
+                logging.ERROR if response.status_code >= 500 else logging.WARNING,
+                "API request failed: %s %s returned %d from %s without a handled exception",
+                request.method,
+                request.url.path,
+                response.status_code,
+                endpoint_name,
+            )
+        return response
 
     @application.get("/api/v1/health", response_model=HealthResponse, tags=["Operations"])
     async def health(
@@ -168,28 +190,98 @@ def register_exception_handlers(application: FastAPI) -> None:
             exception: Exception,
             response_status: int = status_code,
         ) -> JSONResponse:
+            request.state.failure_logged = True
             log_detail = (
                 exception.log_detail
                 if isinstance(exception, ApplicationError) and exception.log_detail
                 else None
             )
-            diagnostic_suffix = f"; {log_detail}" if log_detail else ""
+            error_code = exception.code if isinstance(exception, ApplicationError) else None
+            error_context = exception.context if isinstance(exception, ApplicationError) else None
             logger.log(
                 logging.ERROR if response_status >= 500 else logging.WARNING,
-                "Application error: %s %s returned %d (%s): %s%s",
+                "API request failed: %s %s returned %d (%s): detail=%s; code=%s; "
+                "context=%s; log_detail=%s",
                 request.method,
                 request.url.path,
                 response_status,
                 type(exception).__name__,
                 exception,
-                diagnostic_suffix,
+                error_code,
+                error_context,
+                log_detail,
                 exc_info=(type(exception), exception, exception.__traceback__)
                 if response_status >= 500
                 else None,
             )
-            return JSONResponse(status_code=response_status, content={"detail": str(exception)})
+            content: dict[str, object] = {"detail": str(exception)}
+            if error_code is not None:
+                content["code"] = error_code
+            if error_context is not None:
+                content["context"] = error_context
+            return JSONResponse(status_code=response_status, content=content)
 
         application.add_exception_handler(exception_type, handler)
+
+    async def http_exception_handler(
+        request: Request,
+        exception: Exception,
+    ) -> JSONResponse:
+        assert isinstance(exception, StarletteHTTPException)
+        request.state.failure_logged = True
+        logger.log(
+            logging.ERROR if exception.status_code >= 500 else logging.WARNING,
+            "API request failed: %s %s returned %d (HTTPException): detail=%s",
+            request.method,
+            request.url.path,
+            exception.status_code,
+            exception.detail,
+        )
+        return JSONResponse(
+            status_code=exception.status_code,
+            content={"detail": exception.detail},
+            headers=exception.headers,
+        )
+
+    async def validation_exception_handler(
+        request: Request,
+        exception: Exception,
+    ) -> JSONResponse:
+        assert isinstance(exception, RequestValidationError)
+        request.state.failure_logged = True
+        diagnostics = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']} ({error['type']})"
+            for error in exception.errors()
+        )
+        logger.warning(
+            "API request failed: %s %s returned 422 (RequestValidationError): %s",
+            request.method,
+            request.url.path,
+            diagnostics,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=jsonable_encoder({"detail": exception.errors()}),
+        )
+
+    async def unexpected_exception_handler(request: Request, exception: Exception) -> JSONResponse:
+        request.state.failure_logged = True
+        logger.error(
+            "API request failed: %s %s returned 500 (%s): %s",
+            request.method,
+            request.url.path,
+            type(exception).__name__,
+            exception,
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal server error"},
+        )
+
+    application.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    application.add_exception_handler(RequestValidationError, validation_exception_handler)
+    application.add_exception_handler(Exception, unexpected_exception_handler)
 
 
 app = create_app()

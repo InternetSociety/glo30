@@ -20,6 +20,10 @@ from app.services.s3_tiles import (
     COPERNICUS_CONFIGURATION_MESSAGE,
     COPERNICUS_TIMEOUT_MESSAGE,
     COPERNICUS_UNAVAILABLE_MESSAGE,
+    GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_CODE,
+    GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE,
+    GLO30_TILE_UNAVAILABLE_CODE,
+    GLO30_TILE_UNAVAILABLE_MESSAGE,
     S3TileService,
     catalogue_grid_id,
     copernicus_geocell,
@@ -32,18 +36,11 @@ from app.services.s3_tiles import (
 
 PRODUCT_NAME = "DEM1_SAR_DGE_30_20101226T173648_20140818T173725_ADS_000000_ri2b.DEM"
 TILE_ID = "Copernicus_DSM_10_S40_00_E174_00"
+RESTRICTED_TILE_ID = "Copernicus_DSM_10_N40_00_E044_00"
 PRODUCT_PREFIX = (
     f"CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/26/{PRODUCT_NAME.removesuffix('.DEM')}"
 )
 OBJECT_KEY = f"{PRODUCT_PREFIX}/{TILE_ID}/DEM/{TILE_ID}_DEM.tif"
-RESTRICTED_GEOGRAPHY_DETAIL = (
-    "The geography you have requested is not yet released to the public. Please visit "
-    "https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available "
-    "for more information"
-)
-UNAVAILABLE_GEOGRAPHY_DETAIL = (
-    "The geography you have requested is not available from Copernicus GLO-30"
-)
 
 
 class InMemoryTileRepository:
@@ -173,7 +170,7 @@ def test_catalogue_response_selects_only_glo30_dged_product_prefixes() -> None:
     with pytest.raises(ValueError, match="invalid response"):
         glo30_product_prefixes({"value": {}})
 
-    with pytest.raises(ValueError, match="no usable GLO-30 product paths"):
+    with pytest.raises(ValueError, match="none matched the supported GLO-30"):
         glo30_product_prefixes({"value": [{"Name": "unrelated", "S3Path": "/eodata/other"}]})
 
 
@@ -269,8 +266,13 @@ async def test_restricted_tile_is_rejected_before_catalogue_or_s3_access(tmp_pat
     with pytest.raises(DemCoverageError) as error:
         await service.get_tiles(44.75263893480411, 40.11535693795821, 100)
 
-    assert str(error.value) == RESTRICTED_GEOGRAPHY_DETAIL
-    assert error.value.log_detail == ("Restricted GLO-30 tile(s): Copernicus_DSM_10_N40_00_E044_00")
+    assert str(error.value) == GLO30_TILE_UNAVAILABLE_MESSAGE
+    assert error.value.code == GLO30_TILE_UNAVAILABLE_CODE
+    assert error.value.context == {
+        "tile_id": RESTRICTED_TILE_ID,
+        "reason": "tile_restricted",
+    }
+    assert error.value.log_detail == f"Restricted GLO-30 tile(s): {RESTRICTED_TILE_ID}"
     assert s3_client.calls == []
 
 
@@ -289,10 +291,60 @@ async def test_missing_catalogue_product_is_reported_as_unavailable(tmp_path: Pa
         with pytest.raises(DemCoverageError) as error:
             await service.get_tiles(174.5, -39.5, 100)
 
-    assert str(error.value) == UNAVAILABLE_GEOGRAPHY_DETAIL
+    assert str(error.value) == GLO30_TILE_UNAVAILABLE_MESSAGE
+    assert error.value.code == GLO30_TILE_UNAVAILABLE_CODE
+    assert error.value.context == {
+        "tile_id": TILE_ID,
+        "reason": "catalogue_product_not_found",
+    }
     assert error.value.log_detail == (
         "No GLO-30 catalogue product covers Copernicus_DSM_10_S40_00_E174_00"
     )
+
+
+@pytest.mark.asyncio
+async def test_unmatched_nonempty_catalogue_has_layout_error(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json={"value": [{"Name": "new-layout", "S3Path": "/eodata/new-layout"}]},
+        )
+    )
+    settings = Settings(_env_file=None, tile_cache_dir=tmp_path, glo30_s3_prefix=None)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        service = S3TileService(InMemoryTileRepository(), settings, FakeS3Client(), client)
+        with pytest.raises(TileDownloadError) as error:
+            await service.get_tiles(174.5, -39.5, 100)
+
+    assert str(error.value) == GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE
+    assert error.value.code == GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_CODE
+    assert error.value.context == {"tile_id": TILE_ID}
+    assert error.value.log_detail is not None
+    assert "1 product(s)" in error.value.log_detail
+    assert "name and S3-path patterns" in error.value.log_detail
+
+
+@pytest.mark.asyncio
+async def test_missing_discovered_s3_object_identifies_tile(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json={"value": [{"Name": PRODUCT_NAME, "S3Path": f"/eodata/{PRODUCT_PREFIX}"}]},
+        )
+    )
+    settings = Settings(_env_file=None, tile_cache_dir=tmp_path, glo30_s3_prefix=None)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        service = S3TileService(InMemoryTileRepository(), settings, FakeS3Client(), client)
+        with pytest.raises(DemCoverageError) as error:
+            await service.get_tiles(174.5, -39.5, 100)
+
+    assert str(error.value) == GLO30_TILE_UNAVAILABLE_MESSAGE
+    assert error.value.code == GLO30_TILE_UNAVAILABLE_CODE
+    assert error.value.context == {"tile_id": TILE_ID, "reason": "dem_object_not_found"}
+    assert error.value.log_detail is not None
+    assert TILE_ID in error.value.log_detail
 
 
 @pytest.mark.asyncio
@@ -307,10 +359,11 @@ async def test_missing_direct_s3_object_is_reported_as_unavailable(tmp_path: Pat
     with pytest.raises(DemCoverageError) as error:
         await service.get_tiles(174.5, -39.5, 100)
 
-    assert str(error.value) == UNAVAILABLE_GEOGRAPHY_DETAIL
-    assert error.value.log_detail == (
-        "No GLO-30 DEM object was found for Copernicus_DSM_10_S40_00_E174_00"
-    )
+    assert str(error.value) == GLO30_TILE_UNAVAILABLE_MESSAGE
+    assert error.value.code == GLO30_TILE_UNAVAILABLE_CODE
+    assert error.value.context == {"tile_id": TILE_ID, "reason": "dem_object_not_found"}
+    assert error.value.log_detail is not None
+    assert object_key_for_geocell(TILE_ID, "product") in error.value.log_detail
 
 
 @pytest.mark.asyncio

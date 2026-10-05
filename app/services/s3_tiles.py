@@ -34,14 +34,14 @@ GEOCELL_PATTERN = re.compile(
     r"^Copernicus_DSM_10_(?P<latitude_hemisphere>[NS])(?P<latitude>\d{2})_00_"
     r"(?P<longitude_hemisphere>[EW])(?P<longitude>\d{3})_00$"
 )
-RESTRICTED_GEOGRAPHY_MESSAGE = (
-    "The geography you have requested is not yet released to the public. Please visit "
-    "https://sentinels.copernicus.eu/-/copernicus-dem-30-metre-dataset-now-freely-available "
-    "for more information"
+GLO30_TILE_UNAVAILABLE_MESSAGE = (
+    "Copernicus GLO-30 data is unavailable for a tile in the requested area"
 )
-UNAVAILABLE_GEOGRAPHY_MESSAGE = (
-    "The geography you have requested is not available from Copernicus GLO-30"
+GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE = (
+    "The Copernicus GLO-30 catalogue returned an unsupported product layout"
 )
+GLO30_TILE_UNAVAILABLE_CODE = "glo30_tile_unavailable"
+GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_CODE = "glo30_catalogue_layout_unsupported"
 COPERNICUS_TIMEOUT_MESSAGE = "Copernicus data access timed out. Please try again later"
 COPERNICUS_CONFIGURATION_MESSAGE = (
     "Copernicus data access is unavailable due to a site configuration problem. "
@@ -63,6 +63,10 @@ S3_AUTH_ERROR_CODES = frozenset(
 )
 S3_TIMEOUT_ERRORS = (ConnectTimeoutError, ReadTimeoutError)
 logger = logging.getLogger("uvicorn.error")
+
+
+class UnsupportedCatalogueLayoutError(ValueError):
+    """The catalogue has products, but none use the supported GLO-30 layout."""
 
 
 def copernicus_geocell(south: int, west: int) -> str:
@@ -119,7 +123,10 @@ def glo30_product_prefixes(payload: Any) -> list[str]:
         ):
             prefixes.append(s3_path.removeprefix("/eodata/").strip("/"))
     if products and not prefixes:
-        raise ValueError("Copernicus catalogue returned no usable GLO-30 product paths")
+        raise UnsupportedCatalogueLayoutError(
+            f"Copernicus catalogue returned {len(products)} product(s), but none matched "
+            "the supported GLO-30 name and S3-path patterns"
+        )
     return prefixes
 
 
@@ -224,8 +231,11 @@ class S3TileService:
             tile_id for tile_id in tile_ids if tile_id in self.settings.glo30_restricted_tile_ids
         )
         if restricted_tile_ids:
+            tile_id = restricted_tile_ids[0]
             raise DemCoverageError(
-                RESTRICTED_GEOGRAPHY_MESSAGE,
+                GLO30_TILE_UNAVAILABLE_MESSAGE,
+                code=GLO30_TILE_UNAVAILABLE_CODE,
+                context={"tile_id": tile_id, "reason": "tile_restricted"},
                 log_detail=f"Restricted GLO-30 tile(s): {', '.join(restricted_tile_ids)}",
             )
 
@@ -275,7 +285,9 @@ class S3TileService:
         product_prefixes = await self._catalogue_product_prefixes(tile_id)
         if not product_prefixes:
             raise DemCoverageError(
-                UNAVAILABLE_GEOGRAPHY_MESSAGE,
+                GLO30_TILE_UNAVAILABLE_MESSAGE,
+                code=GLO30_TILE_UNAVAILABLE_CODE,
+                context={"tile_id": tile_id, "reason": "catalogue_product_not_found"},
                 log_detail=f"No GLO-30 catalogue product covers {tile_id}",
             )
 
@@ -292,8 +304,13 @@ class S3TileService:
             raise self._s3_access_error(exc, operation="search", tile_id=tile_id) from exc
         if object_key is None:
             raise DemCoverageError(
-                UNAVAILABLE_GEOGRAPHY_MESSAGE,
-                log_detail=f"No GLO-30 DEM object was found for {tile_id}",
+                GLO30_TILE_UNAVAILABLE_MESSAGE,
+                code=GLO30_TILE_UNAVAILABLE_CODE,
+                context={"tile_id": tile_id, "reason": "dem_object_not_found"},
+                log_detail=(
+                    f"No GLO-30 DEM object matching {tile_id}/DEM/{tile_id}_DEM.tif was found "
+                    f"for {tile_id} across {len(product_prefixes)} supported catalogue product(s)"
+                ),
             )
         logger.info("Resolved Copernicus GLO-30 tile %s to S3 object %s", tile_id, object_key)
         return object_key
@@ -367,6 +384,13 @@ class S3TileService:
                     f"({type(exc).__name__}: {exc})"
                 ),
             ) from exc
+        except UnsupportedCatalogueLayoutError as exc:
+            raise TileDownloadError(
+                GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE,
+                code=GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_CODE,
+                context={"tile_id": tile_id},
+                log_detail=(f"Copernicus catalogue layout is unsupported for {tile_id}: {exc}"),
+            ) from exc
         except ValueError as exc:
             raise TileDownloadError(
                 COPERNICUS_UNAVAILABLE_MESSAGE,
@@ -396,8 +420,13 @@ class S3TileService:
         except ClientError as exc:
             if is_missing_s3_object_error(exc):
                 raise DemCoverageError(
-                    UNAVAILABLE_GEOGRAPHY_MESSAGE,
-                    log_detail=f"No GLO-30 DEM object was found for {tile_id}",
+                    GLO30_TILE_UNAVAILABLE_MESSAGE,
+                    code=GLO30_TILE_UNAVAILABLE_CODE,
+                    context={"tile_id": tile_id, "reason": "dem_object_not_found"},
+                    log_detail=(
+                        f"Copernicus S3 returned a missing-object response while downloading "
+                        f"{object_key} for GLO-30 tile {tile_id}"
+                    ),
                 ) from exc
             raise self._s3_access_error(exc, operation="download", tile_id=tile_id) from exc
         except BotoCoreError as exc:
