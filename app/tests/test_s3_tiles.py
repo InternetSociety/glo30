@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
+import rasterio
 from botocore.exceptions import ClientError, ReadTimeoutError
 
 from app.config import Settings
@@ -24,6 +25,7 @@ from app.services.s3_tiles import (
     GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE,
     GLO30_TILE_UNAVAILABLE_CODE,
     GLO30_TILE_UNAVAILABLE_MESSAGE,
+    ZERO_ELEVATION_OBJECT_KEY,
     S3TileService,
     catalogue_grid_id,
     copernicus_geocell,
@@ -300,6 +302,57 @@ async def test_missing_catalogue_product_is_reported_as_unavailable(tmp_path: Pa
     assert error.value.log_detail == (
         "No GLO-30 catalogue product covers Copernicus_DSM_10_S40_00_E174_00"
     )
+
+
+@pytest.mark.asyncio
+async def test_missing_adjacent_tile_uses_cached_zero_elevation_tile(tmp_path: Path) -> None:
+    observer_tile_id = "Copernicus_DSM_10_S08_00_E131_00"
+    available_tile_ids = {
+        observer_tile_id,
+        "Copernicus_DSM_10_S07_00_E131_00",
+        "Copernicus_DSM_10_S07_00_E132_00",
+    }
+    missing_tile_id = "Copernicus_DSM_10_S08_00_E132_00"
+    grid_ids = {
+        catalogue_grid_id(tile_id): tile_id for tile_id in available_tile_ids | {missing_tile_id}
+    }
+    queried_grid_ids: list[str] = []
+
+    def catalogue_response(request: httpx.Request) -> httpx.Response:
+        query_filter = request.url.params["$filter"]
+        grid_id = next(grid_id for grid_id in grid_ids if grid_id in query_filter)
+        queried_grid_ids.append(grid_id)
+        if grid_ids[grid_id] in available_tile_ids:
+            return httpx.Response(
+                200,
+                json={"value": [{"Name": PRODUCT_NAME, "S3Path": f"/eodata/{PRODUCT_PREFIX}"}]},
+            )
+        return httpx.Response(200, json={"value": []})
+
+    repository = InMemoryTileRepository()
+    settings = Settings(_env_file=None, tile_cache_dir=tmp_path, glo30_s3_prefix=None)
+    s3_client = FakeS3Client(
+        [f"{PRODUCT_PREFIX}/{tile_id}/DEM/{tile_id}_DEM.tif" for tile_id in available_tile_ids]
+    )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(catalogue_response)) as client:
+        service = S3TileService(repository, settings, s3_client, client)
+        first = await service.get_tiles(131.97368749999998, -7.0015625, 3000)
+        second = await service.get_tiles(131.97368749999998, -7.0015625, 3000)
+
+    assert first == second
+    assert queried_grid_ids == ["S08_E131", "S07_E131", "S07_E132", "S08_E132"]
+    assert [path.name for path in first] == [
+        f"{observer_tile_id}_DEM.tif",
+        "Copernicus_DSM_10_S07_00_E131_00_DEM.tif",
+        "Copernicus_DSM_10_S07_00_E132_00_DEM.tif",
+        f"{missing_tile_id}_DEM.tif",
+    ]
+    assert repository.tiles[missing_tile_id].object_key == ZERO_ELEVATION_OBJECT_KEY
+    with rasterio.open(first[-1]) as zero_tile:
+        assert zero_tile.crs == rasterio.CRS.from_epsg(4326)
+        assert tuple(zero_tile.bounds) == (132.0, -8.0, 133.0, -7.0)
+        assert zero_tile.read(1).tolist() == [[0.0]]
 
 
 @pytest.mark.asyncio

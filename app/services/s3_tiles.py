@@ -11,9 +11,12 @@ from typing import Any
 
 import boto3
 import httpx
+import numpy as np
+import rasterio
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, ConnectTimeoutError, ReadTimeoutError
 from pyproj import Geod
+from rasterio.transform import from_origin
 
 from app.config import Settings
 from app.exceptions import (
@@ -42,6 +45,8 @@ GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_MESSAGE = (
 )
 GLO30_TILE_UNAVAILABLE_CODE = "glo30_tile_unavailable"
 GLO30_CATALOGUE_LAYOUT_UNSUPPORTED_CODE = "glo30_catalogue_layout_unsupported"
+ZERO_ELEVATION_OBJECT_KEY = "synthetic-zero-elevation"
+MISSING_TILE_REASONS = frozenset({"catalogue_product_not_found", "dem_object_not_found"})
 COPERNICUS_TIMEOUT_MESSAGE = "Copernicus data access timed out. Please try again later"
 COPERNICUS_CONFIGURATION_MESSAGE = (
     "Copernicus data access is unavailable due to a site configuration problem. "
@@ -239,9 +244,28 @@ class S3TileService:
                 log_detail=f"Restricted GLO-30 tile(s): {', '.join(restricted_tile_ids)}",
             )
 
-        paths: list[Path] = []
+        observer_tile_id = copernicus_geocell(
+            max(-90, min(89, math.floor(latitude))),
+            ((math.floor(longitude) + 180) % 360) - 180,
+        )
+        paths = [await self._get_tile(observer_tile_id)]
         for tile_id in tile_ids:
-            paths.append(await self._get_tile(tile_id))
+            if tile_id == observer_tile_id:
+                continue
+            try:
+                paths.append(await self._get_tile(tile_id))
+            except DemCoverageError as exc:
+                reason = exc.context.get("reason") if exc.context is not None else None
+                if exc.code != GLO30_TILE_UNAVAILABLE_CODE or reason not in MISSING_TILE_REASONS:
+                    raise
+                logger.warning(
+                    "GLO-30 tile %s is unavailable (%s); using zero elevation because the "
+                    "observer tile %s is available",
+                    tile_id,
+                    reason,
+                    observer_tile_id,
+                )
+                paths.append(await self._get_zero_elevation_tile(tile_id))
         await self._remove_expired_tiles()
         return paths
 
@@ -258,7 +282,11 @@ class S3TileService:
                 cached.expires_at = expires_at
                 return cached_path
 
-        object_key = cached.object_key if cached else await self._resolve_object_key(tile_id)
+        object_key = (
+            cached.object_key
+            if cached and cached.object_key != ZERO_ELEVATION_OBJECT_KEY
+            else await self._resolve_object_key(tile_id)
+        )
         await self._download(object_key, destination)
 
         if cached:
@@ -271,6 +299,30 @@ class S3TileService:
                 CachedTile(
                     tile_id=tile_id,
                     object_key=object_key,
+                    file_path=str(destination),
+                    last_used_at=now,
+                    expires_at=expires_at,
+                )
+            )
+        return destination
+
+    async def _get_zero_elevation_tile(self, tile_id: str) -> Path:
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(days=self.settings.tile_cache_expiry_days)
+        destination = self.settings.tile_cache_dir / f"{tile_id}_DEM.tif"
+        cached = await self.repository.get_by_tile_id(tile_id)
+        await asyncio.to_thread(self._write_zero_elevation_tile, tile_id, destination)
+
+        if cached:
+            cached.object_key = ZERO_ELEVATION_OBJECT_KEY
+            cached.file_path = str(destination)
+            cached.last_used_at = now
+            cached.expires_at = expires_at
+        else:
+            await self.repository.add(
+                CachedTile(
+                    tile_id=tile_id,
+                    object_key=ZERO_ELEVATION_OBJECT_KEY,
                     file_path=str(destination),
                     last_used_at=now,
                     expires_at=expires_at,
@@ -458,6 +510,29 @@ class S3TileService:
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
             s3_client.download_file(bucket_name, object_key, str(temporary))
+            os.replace(temporary, destination)
+        finally:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _write_zero_elevation_tile(tile_id: str, destination: Path) -> None:
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
+        longitude, latitude = geocell_center(tile_id)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with rasterio.open(
+                temporary,
+                "w",
+                driver="GTiff",
+                width=1,
+                height=1,
+                count=1,
+                dtype="float32",
+                crs="EPSG:4326",
+                transform=from_origin(longitude - 0.5, latitude + 0.5, 1, 1),
+            ) as zero_tile:
+                zero_tile.write(np.zeros((1, 1), dtype=np.float32), 1)
             os.replace(temporary, destination)
         finally:
             with suppress(OSError):

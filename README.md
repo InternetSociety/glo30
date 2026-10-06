@@ -100,15 +100,17 @@ Send API credentials in `Authorization: Bearer TOKEN`. The application tries a p
 
 ### Error handling
 
-The API reports a valid request whose required DEM tile is unavailable as HTTP 422, rather than an upstream gateway error. This lets clients receive the application response instead of a proxy-generated 502 page.
+The API reports a valid request whose observer coordinate has no DEM tile as HTTP 422, rather than an upstream gateway error. This lets clients receive the application response instead of a proxy-generated 502 page.
 
-A request that intersects a geocell withheld from public distribution receives HTTP 422 with an explanation that the geography is not yet released. A tile that is not restricted but has no Copernicus catalogue product or DEM object also receives HTTP 422:
+A request that intersects a geocell withheld from public distribution receives HTTP 422 with an explanation that the geography is not yet released. An observer tile that has no Copernicus catalogue product or DEM object also receives HTTP 422:
 
 ```json
 {
   "detail": "The geography you have requested is not available from Copernicus GLO-30"
 }
 ```
+
+When the observer tile is available but an adjacent tile has no catalogue product or DEM object, the API treats that adjacent tile as zero elevation and continues the viewshed calculation. This assumption is intended for ocean cells and can overstate visibility if an unpublished cell contains terrain.
 
 Actual Copernicus catalogue or S3 failures receive HTTP 502. Viewshed-processing failures receive HTTP 500. The configured `glo30_restricted_tile_ids` list contains the known unavailable geocells.
 
