@@ -1,8 +1,20 @@
+from collections.abc import Mapping
+
+
 class ApplicationError(Exception):
     """Base class for errors that can be translated into an API response."""
 
-    def __init__(self, message: str, *, log_detail: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        context: Mapping[str, str] | None = None,
+        log_detail: str | None = None,
+    ) -> None:
         super().__init__(message)
+        self.code = code
+        self.context = dict(context) if context is not None else None
         self.log_detail = log_detail
 
 
