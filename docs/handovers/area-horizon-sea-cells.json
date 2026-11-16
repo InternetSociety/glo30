@@ -1,0 +1,32 @@
+[
+  {
+    "tile_id": "Copernicus_DSM_10_S41_00_E173_00",
+    "valid_zero_cells": 12515676,
+    "masked_cells": 0,
+    "nonfinite_cells": 0
+  },
+  {
+    "tile_id": "Copernicus_DSM_10_S41_00_E174_00",
+    "valid_zero_cells": 12854488,
+    "masked_cells": 0,
+    "nonfinite_cells": 0
+  },
+  {
+    "tile_id": "Copernicus_DSM_10_S42_00_E173_00",
+    "valid_zero_cells": 1982569,
+    "masked_cells": 0,
+    "nonfinite_cells": 0
+  },
+  {
+    "tile_id": "Copernicus_DSM_10_S42_00_E174_00",
+    "valid_zero_cells": 9968059,
+    "masked_cells": 0,
+    "nonfinite_cells": 0
+  },
+  {
+    "tile_id": "Copernicus_DSM_10_S42_00_E175_00",
+    "valid_zero_cells": 7300742,
+    "masked_cells": 0,
+    "nonfinite_cells": 0
+  }
+]

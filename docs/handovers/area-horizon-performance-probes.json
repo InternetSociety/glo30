@@ -1,0 +1,159 @@
+{
+  "service": "http://app:8004",
+  "checked_at": "2026-11-16T01:48:41.682062+00:00",
+  "cases": [
+    {
+      "name": "cook_strait_575m",
+      "elapsed_seconds": 0.789706306066364,
+      "http_status": 200,
+      "response": {
+        "outcome": "beyond_horizon",
+        "observer_coordinates": [
+          175.0538158,
+          -38.0435162
+        ],
+        "observer_antenna_height_asl_m": 575.0,
+        "target_height_agl_m": 2.0,
+        "effective_earth_radius_factor": 1.3333333333333333,
+        "coverage_complete": true,
+        "evaluated_cells": 12539122,
+        "unavailable_cells": 0,
+        "evidence": {
+          "coordinates": [
+            174.10194444444443,
+            -41.09027777777778
+          ],
+          "elevation_m": 1199.6409912109375,
+          "distance_km": 348.0125968848339,
+          "horizon_km": 241.6126675369216
+        },
+        "reason": null,
+        "provenance": {
+          "dem": "Copernicus GLO-30 DGED",
+          "horizontal_crs": "EPSG:4326",
+          "height_processing": "native DEM heights; no vertical transformation",
+          "tiles": [
+            {
+              "tile_id": "Copernicus_DSM_10_S41_00_E173_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/17/DEM1_SAR_DGE_30_20110117T173713_20140903T174700_ADS_000000_nR15_5aa49639",
+              "sha256": "294f82a3b766c5ea02e918e90b8ed8357265b53a3ab5355ff8d4560c5fa02452"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S41_00_E174_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/02/19/DEM1_SAR_DGE_30_20110219T173710_20140818T173807_ADS_000000_NPKx_9472dfba",
+              "sha256": "b59796426180e372773c3f3a94c8b96b010055e26b4905abeb56363ca02bfefa"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S42_00_E173_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/15/DEM1_SAR_DGE_30_20101215T173723_20140903T174700_ADS_000000_M0Sc_adea2397",
+              "sha256": "65d1403711e87b58eaaac49cef9125a7efc6bed8e70f50a07cb1883746586421"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S42_00_E174_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/02/19/DEM1_SAR_DGE_30_20110219T173710_20140818T173807_ADS_000000_xDGC_9472dfba",
+              "sha256": "65e89b973dfd1685e3eb083f1539bbe2d081c54955038a19577355366435ba37"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S42_00_E175_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/23/DEM1_SAR_DGE_30_20110123T172748_20140915T172919_ADS_000000_vpYf_8303cb54",
+              "sha256": "cf3635fc685505411c14d0f465cb63c59c5f8da250fc16d687bfe01a26d21bdc"
+            }
+          ],
+          "sampling": "native_cell_centre",
+          "processor_version": "area-horizon-v2",
+          "tolerance_km": 0.05,
+          "sea_level_assumed_tiles": []
+        }
+      }
+    },
+    {
+      "name": "cook_strait_12000m",
+      "elapsed_seconds": 0.05897405697032809,
+      "http_status": 200,
+      "response": {
+        "outcome": "within_horizon",
+        "observer_coordinates": [
+          175.0538158,
+          -38.0435162
+        ],
+        "observer_antenna_height_asl_m": 12000.0,
+        "target_height_agl_m": 2.0,
+        "effective_earth_radius_factor": 1.3333333333333333,
+        "coverage_complete": false,
+        "evaluated_cells": 566,
+        "unavailable_cells": 0,
+        "evidence": {
+          "coordinates": [
+            174.7788112,
+            -40.8327585
+          ],
+          "elevation_m": 0.0,
+          "distance_km": 310.5756978068973,
+          "horizon_km": 457.14994726123405
+        },
+        "reason": "stopped_at_witness",
+        "provenance": {
+          "dem": "Copernicus GLO-30 DGED",
+          "horizontal_crs": "EPSG:4326",
+          "height_processing": "native DEM heights; no vertical transformation",
+          "tiles": [
+            {
+              "tile_id": "Copernicus_DSM_10_S41_00_E174_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/02/19/DEM1_SAR_DGE_30_20110219T173710_20140818T173807_ADS_000000_NPKx_9472dfba",
+              "sha256": "b59796426180e372773c3f3a94c8b96b010055e26b4905abeb56363ca02bfefa"
+            }
+          ],
+          "sampling": "native_cell_centre",
+          "processor_version": "area-horizon-v2",
+          "tolerance_km": 0.05,
+          "sea_level_assumed_tiles": []
+        }
+      }
+    },
+    {
+      "name": "point_readiness",
+      "elapsed_seconds": 0.05671620904468,
+      "http_status": 200,
+      "response": {
+        "outcome": "within_horizon",
+        "observer_coordinates": [
+          174.2316077,
+          -39.0035668
+        ],
+        "observer_antenna_height_asl_m": 300.0,
+        "target_height_agl_m": 2.0,
+        "effective_earth_radius_factor": 1.3333333333333333,
+        "coverage_complete": true,
+        "evaluated_cells": 1,
+        "unavailable_cells": 0,
+        "evidence": {
+          "coordinates": [
+            174.2316077,
+            -39.0035668
+          ],
+          "elevation_m": 9.775607109069824,
+          "distance_km": 0.0,
+          "horizon_km": 85.49852231807313
+        },
+        "reason": null,
+        "provenance": {
+          "dem": "Copernicus GLO-30 DGED",
+          "horizontal_crs": "EPSG:4326",
+          "height_processing": "native DEM heights; no vertical transformation",
+          "tiles": [
+            {
+              "tile_id": "Copernicus_DSM_10_S40_00_E174_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/26/DEM1_SAR_DGE_30_20101226T173648_20140818T173725_ADS_000000_ri2b_9472dfba",
+              "sha256": "9a415439ef2cbf2a49bd149d137cd735cf854d0d3c880a03dedf96a891ceb19b"
+            }
+          ],
+          "sampling": "native_cell",
+          "processor_version": "area-horizon-v2",
+          "tolerance_km": 0.0,
+          "sea_level_assumed_tiles": []
+        }
+      }
+    }
+  ],
+  "openapi_sha256": "83267cd4de1de7ca39237ffdc6c49342a68f841b5fd6b2827cf3718148a6c27b"
+}

@@ -126,6 +126,9 @@ class Settings(BaseSettings):
     refraction_coefficient: float = 1.0 / 7.0
     gdal_viewshed_path: str = "gdal_viewshed"
     viewshed_timeout_seconds: int = 300
+    elevation_max_batch_points: int = Field(default=1000, ge=1, le=1000)
+    area_horizon_max_cells: int = Field(default=25_000_000, ge=1)
+    area_horizon_timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_geometry_vertex_budgets(self) -> Self:

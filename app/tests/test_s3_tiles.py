@@ -346,7 +346,7 @@ async def test_missing_adjacent_tile_uses_cached_zero_elevation_tile(tmp_path: P
         f"{observer_tile_id}_DEM.tif",
         "Copernicus_DSM_10_S07_00_E131_00_DEM.tif",
         "Copernicus_DSM_10_S07_00_E132_00_DEM.tif",
-        f"{missing_tile_id}_DEM.tif",
+        f"{missing_tile_id}_ZERO.tif",
     ]
     assert repository.tiles[missing_tile_id].object_key == ZERO_ELEVATION_OBJECT_KEY
     with rasterio.open(first[-1]) as zero_tile:
@@ -565,3 +565,53 @@ def test_fake_repository_satisfies_service_protocol_at_runtime() -> None:
     # This test intentionally keeps the fake's public surface obvious as the service evolves.
     repository: Any = InMemoryTileRepository()
     assert callable(repository.get_by_tile_id)
+
+
+@pytest.mark.asyncio
+async def test_native_acquisition_replaces_cached_synthetic_tile(tmp_path, db_session):
+    from app.repositories.cached_tiles import CachedTileRepository
+
+    now = datetime.now(UTC)
+    old_path = tmp_path / f"{TILE_ID}_DEM.tif"
+    old_path.write_bytes(b"synthetic")
+    repository = CachedTileRepository(db_session)
+    await repository.add(
+        CachedTile(
+            tile_id=TILE_ID,
+            object_key=ZERO_ELEVATION_OBJECT_KEY,
+            file_path=str(old_path),
+            last_used_at=now,
+            expires_at=now + timedelta(days=1),
+        )
+    )
+    service = S3TileService(
+        repository,
+        Settings(tile_cache_dir=tmp_path, glo30_s3_prefix="real/product"),
+        s3_client=FakeS3Client(),
+    )
+    sources = await service.get_native_tiles([TILE_ID])
+    source = sources[TILE_ID]
+    assert source is not None
+    assert source.path.read_bytes() == b"fake-geotiff"
+    assert source.product_id == "real/product"
+    # Subsequent viewshed fallback must not overwrite the native file.
+    await service._get_zero_elevation_tile(TILE_ID)
+    assert source.path.read_bytes() == b"fake-geotiff"
+
+
+@pytest.mark.asyncio
+async def test_native_restricted_and_absent_are_unavailable(tmp_path, db_session):
+    from app.repositories.cached_tiles import CachedTileRepository
+
+    response = httpx.Response(200, json={"value": []})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as client:
+        service = S3TileService(
+            CachedTileRepository(db_session),
+            Settings(tile_cache_dir=tmp_path),
+            catalogue_client=client,
+        )
+        sources = await service.get_native_tiles([TILE_ID, RESTRICTED_TILE_ID])
+        reasons = await service.get_native_sources([TILE_ID, RESTRICTED_TILE_ID])
+    assert sources == {TILE_ID: None, RESTRICTED_TILE_ID: None}
+    assert reasons[TILE_ID].reason == "catalogue_product_not_found"
+    assert reasons[RESTRICTED_TILE_ID].reason == "tile_restricted"

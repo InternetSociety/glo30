@@ -9,12 +9,14 @@ from app.database import get_db
 from app.models.user import User
 from app.repositories.cached_tiles import CachedTileRepository
 from app.repositories.users import UserRepository
+from app.services.area_horizon import AreaHorizonService
 from app.services.auth import (
     CSRF_COOKIE_NAME,
     SESSION_COOKIE_NAME,
     csrf_token_is_valid,
     decode_access_token,
 )
+from app.services.elevations import ElevationService
 from app.services.s3_tiles import S3TileService
 from app.services.tile_cache import TileCacheService
 from app.services.users import UserService
@@ -89,6 +91,14 @@ def get_tile_cache_service(
 def get_viewshed_service(db: Annotated[AsyncSession, Depends(get_db)]) -> ViewshedService:
     tile_service = S3TileService(CachedTileRepository(db), settings)
     return ViewshedService(tile_service, ViewshedProcessor(settings), settings)
+
+
+def get_elevation_service(db: Annotated[AsyncSession, Depends(get_db)]) -> ElevationService:
+    return ElevationService(S3TileService(CachedTileRepository(db), settings), settings)
+
+
+def get_area_horizon_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AreaHorizonService:
+    return AreaHorizonService(S3TileService(CachedTileRepository(db), settings), settings)
 
 
 async def verify_csrf_token(

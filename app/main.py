@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from html import escape
@@ -19,18 +20,20 @@ from app.database import ensure_data_directories
 from app.dependencies import get_current_active_user, get_current_user
 from app.exceptions import (
     ApplicationError,
+    AreaHorizonTimeoutError,
     CopernicusConfigurationError,
     CopernicusTimeoutError,
     DemCoverageError,
     DuplicateUserError,
     InvalidUserOperationError,
     RadiusLimitError,
+    TerrainLimitError,
     TileDownloadError,
     UserNotFoundError,
     ViewshedProcessingError,
 )
 from app.models.user import User
-from app.routers import auth, tile_cache, users, viewsheds
+from app.routers import auth, terrain, tile_cache, users, viewsheds
 from app.schemas.health import HealthResponse
 from app.services.auth import CSRF_COOKIE_NAME, create_csrf_token
 
@@ -60,6 +63,7 @@ def create_app() -> FastAPI:
     application.include_router(users.router)
     application.include_router(tile_cache.router)
     application.include_router(viewsheds.router)
+    application.include_router(terrain.router)
     register_exception_handlers(application)
 
     @application.middleware("http")
@@ -176,6 +180,8 @@ def register_exception_handlers(application: FastAPI) -> None:
         (UserNotFoundError, status.HTTP_404_NOT_FOUND),
         (InvalidUserOperationError, status.HTTP_400_BAD_REQUEST),
         (RadiusLimitError, status.HTTP_422_UNPROCESSABLE_CONTENT),
+        (TerrainLimitError, status.HTTP_422_UNPROCESSABLE_CONTENT),
+        (AreaHorizonTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT),
         (DemCoverageError, status.HTTP_422_UNPROCESSABLE_CONTENT),
         (CopernicusTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT),
         (CopernicusConfigurationError, status.HTTP_502_BAD_GATEWAY),
@@ -261,7 +267,10 @@ def register_exception_handlers(application: FastAPI) -> None:
         )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=jsonable_encoder({"detail": exception.errors()}),
+            content=jsonable_encoder(
+                {"detail": exception.errors()},
+                custom_encoder={float: lambda value: value if math.isfinite(value) else None},
+            ),
         )
 
     async def unexpected_exception_handler(request: Request, exception: Exception) -> JSONResponse:

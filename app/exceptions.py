@@ -64,3 +64,11 @@ class TileDownloadError(ApplicationError):
 
 class ViewshedProcessingError(ApplicationError):
     pass
+
+
+class TerrainLimitError(ApplicationError):
+    pass
+
+
+class AreaHorizonTimeoutError(ApplicationError):
+    pass

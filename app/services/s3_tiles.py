@@ -5,6 +5,7 @@ import os
 import re
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -207,6 +208,19 @@ def geocells_for_circle(
     return sorted(geocells)
 
 
+@dataclass(frozen=True)
+class NativeTile:
+    tile_id: str
+    product_id: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class UnavailableTile:
+    tile_id: str
+    reason: str
+
+
 class S3TileService:
     def __init__(
         self,
@@ -269,13 +283,50 @@ class S3TileService:
         await self._remove_expired_tiles()
         return paths
 
-    async def _get_tile(self, tile_id: str) -> Path:
+    async def get_native_tiles(self, tile_ids: list[str]) -> dict[str, NativeTile | None]:
+        """Acquire actual DEM sources; known coverage gaps never become zero terrain."""
+        sources = await self.get_native_sources(tile_ids)
+        return {
+            tile_id: source if isinstance(source, NativeTile) else None
+            for tile_id, source in sources.items()
+        }
+
+    async def get_native_sources(
+        self,
+        tile_ids: list[str],
+    ) -> dict[str, NativeTile | UnavailableTile]:
+        """Keep coverage reasons so each operation can apply its own missing-data policy."""
+        sources: dict[str, NativeTile | UnavailableTile] = {}
+        for tile_id in sorted(set(tile_ids)):
+            if tile_id in self.settings.glo30_restricted_tile_ids:
+                sources[tile_id] = UnavailableTile(tile_id, "tile_restricted")
+                continue
+            try:
+                path = await self._get_tile(tile_id, native_only=True)
+            except DemCoverageError as exc:
+                reason = exc.context.get("reason") if exc.context else None
+                if exc.code != GLO30_TILE_UNAVAILABLE_CODE or reason not in MISSING_TILE_REASONS:
+                    raise
+                sources[tile_id] = UnavailableTile(tile_id, str(reason))
+                continue
+            cached = await self.repository.get_by_tile_id(tile_id)
+            assert cached is not None
+            product_id = cached.object_key.removesuffix(f"/{tile_id}/DEM/{tile_id}_DEM.tif")
+            sources[tile_id] = NativeTile(tile_id, product_id, path)
+        await self._remove_expired_tiles()
+        return sources
+
+    async def _get_tile(self, tile_id: str, *, native_only: bool = False) -> Path:
         now = datetime.now(UTC)
         expires_at = now + timedelta(days=self.settings.tile_cache_expiry_days)
         destination = self.settings.tile_cache_dir / f"{tile_id}_DEM.tif"
         cached = await self.repository.get_by_tile_id(tile_id)
 
-        if cached and self._as_utc(cached.expires_at) >= now:
+        if (
+            cached
+            and self._as_utc(cached.expires_at) >= now
+            and not (native_only and cached.object_key == ZERO_ELEVATION_OBJECT_KEY)
+        ):
             cached_path = Path(cached.file_path)
             if await asyncio.to_thread(cached_path.is_file):
                 cached.last_used_at = now
@@ -309,7 +360,7 @@ class S3TileService:
     async def _get_zero_elevation_tile(self, tile_id: str) -> Path:
         now = datetime.now(UTC)
         expires_at = now + timedelta(days=self.settings.tile_cache_expiry_days)
-        destination = self.settings.tile_cache_dir / f"{tile_id}_DEM.tif"
+        destination = self.settings.tile_cache_dir / f"{tile_id}_ZERO.tif"
         cached = await self.repository.get_by_tile_id(tile_id)
         await asyncio.to_thread(self._write_zero_elevation_tile, tile_id, destination)
 

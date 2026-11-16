@@ -54,6 +54,8 @@ All application endpoints use the `/api/v1` prefix and require an active account
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/health` | None | Service health response. |
 | `POST` | `/api/v1/viewsheds` | Observer, heights, and radius JSON body. | A visible-area GeoJSON Feature. |
+| `POST` | `/api/v1/elevations` | Up to 1,000 longitude/latitude pairs. | Native elevations, availability, and source provenance. |
+| `POST` | `/api/v1/area-horizon` | Observer ASL height and target geometry. | Radio-horizon outcome, evidence, coverage, and source provenance. |
 
 For example:
 
@@ -114,6 +116,144 @@ When the observer tile is available but an adjacent tile has no catalogue produc
 
 Actual Copernicus catalogue or S3 failures receive HTTP 502. Viewshed-processing failures receive HTTP 500. The configured `glo30_restricted_tile_ids` list contains the known unavailable geocells.
 
+### Native point elevations
+
+`POST /api/v1/elevations` accepts this JSON body:
+
+```json
+{"coordinates": [[174.75, -41.25], [174.76, -41.26]]}
+```
+
+Supply 1–1,000 finite WGS84 coordinate pairs in `[longitude, latitude]` order.
+Longitude accepts -180 through 180. Latitude accepts -90 through 90.
+`ELEVATION_MAX_BATCH_POINTS` can lower the batch limit.
+The service preserves order and duplicates.
+It samples the containing native raster cell with floor-based indexing, without interpolation.
+An exact geocell boundary selects the eastern or northern geocell. Global bounds clamp to the outermost geocell.
+
+The response contains `results` and `provenance`.
+Each result contains `coordinates`, `status`, `elevation_m`, and `reason`.
+Successful results have status `ok`, a floating-point elevation, and a null reason.
+Missing, withheld, masked, or nodata terrain has status `unavailable`, a null elevation, and reason `dem_unavailable`.
+Zero and negative elevations remain valid measurements.
+This operation never substitutes synthetic zero tiles, including synthetic tiles already in the viewshed cache.
+
+Copernicus GLO-30 is a digital surface model (DSM), which includes vegetation and buildings.
+Its native heights use EGM2008 (EPSG:3855), in meters.
+DGED uses point-registered rasters and latitude-dependent longitudinal spacing.
+The service uses the raster's actual transform and does no vertical conversion.
+Callers must supply compatible observer ASL heights. Ellipsoidal GNSS heights require an external conversion.
+See the [Copernicus dataset specification](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM).
+
+### Area radio horizon
+
+`POST /api/v1/area-horizon` accepts this JSON body:
+
+```json
+{
+  "observer_coordinates": [174.75, -41.25],
+  "observer_antenna_height_asl_m": 300,
+  "target_height_agl_m": 2,
+  "effective_earth_radius_factor": 1.3333333333333333,
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[174.8, -41.3], [174.9, -41.3], [174.9, -41.2], [174.8, -41.2], [174.8, -41.3]]]
+  }
+}
+```
+
+Supply a valid, nonempty GeoJSON Polygon, MultiPolygon, Point, or MultiPoint geometry.
+Features, self-intersections, unclosed rings, extra coordinate dimensions, and polygons crossing the antimeridian receive HTTP 422.
+Separate polygon components on opposite sides of the antimeridian are permitted.
+Observer coordinates obey the elevation coordinate rules.
+
+Observer ASL height accepts -500 through 12,000 meters. The calculation and response clamp negative observer heights to zero.
+Target AGL height defaults to 2 meters and accepts 0 through 3,000 meters.
+The effective Earth-radius factor defaults to 4/3 and accepts values greater than zero through 10.
+All numeric inputs must be finite. The response echoes effective inputs.
+
+Processor v2 evaluates native cell centres inside the licensed geometry and samples its exterior and hole boundaries.
+Boundary samples include native grid crossings and interval midpoints, with spacing no greater than one native cell.
+Thus, narrow polygons and slivers retain candidates even when they contain no cell centre.
+Each candidate uses its own cell elevation and WGS84 geodesic distance.
+The polygon comparison includes a fixed 0.05 km tolerance, larger than half a native cell diagonal.
+Point and MultiPoint geometries retain exact coordinates and a zero-tolerance comparison.
+
+The processor applies this smooth-earth formula, with heights in meters and distances in kilometers:
+
+```text
+h1 = max(0, observer_antenna_height_asl_m)
+h2 = max(0, native_elevation_m + target_height_agl_m)
+coefficient = 4.12 * sqrt(effective_earth_radius_factor / (4/3))
+horizon_km = coefficient * (sqrt(h1) + sqrt(h2))
+tolerance_km = 0.05 for Polygon/MultiPolygon, otherwise 0
+within = distance_km - horizon_km <= tolerance_km
+```
+
+This operation tests the radio horizon with terrain receiver heights. It does not test terrain obstructions or calculate a viewshed.
+
+| Outcome | Meaning |
+| --- | --- |
+| `within_horizon` | At least one valid terrain location is within the horizon, even if other terrain is unavailable. |
+| `beyond_horizon` | All required terrain is available and every location is beyond the horizon. |
+| `indeterminate` | Missing terrain prevents a decision and no valid location proves `within_horizon`. The reason is `incomplete_dem`. |
+
+The response includes `coverage_complete`, `evaluated_cells`, `unavailable_cells`, `evidence`, and `provenance`.
+Polygon counts describe interior-centre cells plus boundary cells not already counted. Multiple boundary samples in one cell count once.
+Point/MultiPoint counts describe exact targets, including duplicates.
+For absent files, unavailable-cell counts use the documented DGED grid for that latitude band.
+Evidence contains `coordinates`, `elevation_m`, `distance_km`, and `horizon_km` for the smallest `distance_km - horizon_km`.
+Ascending longitude, then latitude, resolves equal margins. Evidence is null when no valid terrain exists.
+The processor compares full floating-point values and does not round evidence before serialization.
+Beyond-horizon results retain the global minimum-margin evidence among v2 candidates.
+Polygon processing stops after a batch supplies a within-horizon witness.
+Such results return the best candidate examined so far, `coverage_complete: false`, reason `stopped_at_witness`, and partial counts.
+An observer inside or on the geometry receives an immediate zero-distance witness when its containing cell has usable terrain.
+Observers in holes do not qualify for that shortcut. Unavailable observer terrain does not prevent a search for another valid witness.
+
+Only area horizon treats an unpublished geocell as sea level when acquisition reports `catalogue_product_not_found` or `dem_object_not_found`.
+This rule applies to all area-horizon geometry types. Those cells count as evaluated at 0 meters.
+Provenance lists their IDs in `sea_level_assumed_tiles`, without synthetic source files or invented hashes.
+Restricted tiles, published-tile nodata, and upstream failures retain their existing behavior.
+Point elevations still return `unavailable` for unpublished geocells.
+
+Both native operations return source provenance with the DEM name, EPSG:4326 horizontal CRS, and native-height processing description.
+Each inspected source tile supplies `tile_id`, `product_id`, and the source DEM file's `sha256`.
+`product_id` is the actual S3 product prefix containing the geocell. Direct-prefix deployments use their configured source prefix.
+Tile entries are unique and sorted by tile ID.
+Elevation provenance uses sampling `native_cell` and processor version `elevation-v1`.
+Area-horizon provenance uses processor version `area-horizon-v2`.
+Polygon/MultiPolygon sampling is `native_cell_centre`, with `tolerance_km: 0.05`.
+Point/MultiPoint sampling is `native_cell`, with `tolerance_km: 0`.
+Area-horizon responses always include `sea_level_assumed_tiles`, which is empty when no sea-level assumption contributed.
+
+The area limit counts the union of candidate raster windows before sampling.
+Thin or fragmented shapes can exceed this conservative budget even when they intersect fewer cells.
+The processor checks nominal windows before downloads and checks actual raster headers before evaluation.
+It reads bounded raster windows and processes at most 4,096 cells per batch, outside the async event loop.
+Batch rectangles wholly inside or outside the geometry avoid per-cell geometry tests.
+Boundary-crossing batches use vectorized point-in-polygon tests rather than cell clipping.
+After one raster read, each batch's maximum valid elevation and conservative distance bound determine whether it can improve the evidence.
+Batches that cannot improve it skip per-candidate distances but still count terrain availability.
+Tiles and their batches start with their nearest distance bounds. Request logs include read, distance, and pruned batch counts.
+The deadline includes planning, acquisition, hashing, and evaluation. Workers check cancellation between bounded operations.
+
+Invalid input receives HTTP 422. A cell-budget failure receives HTTP 422 with code `area_horizon_limit`.
+The processing deadline receives HTTP 504 with code `area_horizon_timeout`.
+Catalogue, network, and authentication failures retain the existing HTTP 502/504 mappings.
+These failures never become ordinary unavailable terrain or a `beyond_horizon` result.
+
+Run the authenticated handover 02 acceptance probes against the local Compose service:
+
+```bash
+docker compose run --rm app python -m scripts.benchmark_area_horizon
+```
+
+The command uses an existing active account and keeps its temporary JWT in memory.
+It prints the three elapsed times, complete responses, and the served OpenAPI document's SHA-256 hash.
+It checks the v2 processor, expected outcomes, and the warm Cook Strait request's 30-second limit.
+See [handover 02 results](docs/handovers/area-horizon-performance.md) for measurements and changed regression tests.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Change values there, then restart the app container. `app/config.py` defines the settings, types, validation, and defaults. Environment variables override those defaults.
@@ -128,6 +268,9 @@ Copy `.env.example` to `.env`. Change values there, then restart the app contain
 | `S3_BUCKET_NAME` | `eodata` | Copernicus S3 bucket name. |
 | `GLO30_S3_PREFIX` | Empty | Optional direct S3 prefix that bypasses catalogue discovery. |
 | `MAX_RADIUS_M` | `100000` | Largest accepted viewshed radius in metres. |
+| `ELEVATION_MAX_BATCH_POINTS` | `1000` | Native elevation batch limit, from 1 through 1,000. |
+| `AREA_HORIZON_MAX_CELLS` | `25000000` | Conservative candidate-cell budget for area horizon. |
+| `AREA_HORIZON_TIMEOUT_SECONDS` | `300` | Total area-horizon deadline in seconds. |
 | `DEM_RESOLUTION_M` | `30` | Working-raster cell size in metres. |
 | `DEM_RESAMPLING_METHOD` | `bilinear` | Elevation interpolation for the working grid. |
 | `GEOMETRY_VERTICES_PER_SQ_KM` | `100` | Vertex budget density for the output geometry. |
