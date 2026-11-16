@@ -56,6 +56,7 @@ All application endpoints use the `/api/v1` prefix and require an active account
 | `POST` | `/api/v1/viewsheds` | Observer, heights, and radius JSON body. | A visible-area GeoJSON Feature. |
 | `POST` | `/api/v1/elevations` | Up to 1,000 longitude/latitude pairs. | Native elevations, availability, and source provenance. |
 | `POST` | `/api/v1/area-horizon` | Observer ASL height and target geometry. | Radio-horizon outcome, evidence, coverage, and source provenance. |
+| `POST` | `/api/v1/area-max-elevation` | Polygon or MultiPolygon geometry. | Highest native elevation, cell centre, coverage, and source provenance. |
 
 For example:
 
@@ -254,6 +255,57 @@ It prints the three elapsed times, complete responses, and the served OpenAPI do
 It checks the v2 processor, expected outcomes, and the warm Cook Strait request's 30-second limit.
 See [handover 02 results](docs/handovers/area-horizon-performance.md) for measurements and changed regression tests.
 
+### Highest terrain in an area
+
+`POST /api/v1/area-max-elevation` finds the highest native terrain cell for a stored area.
+It uses the same active-account authentication as the other terrain operations.
+Swagger supplies this complete request example:
+
+```json
+{
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[175.05, -38.03], [175.15, -38.03], [175.15, -37.95], [175.05, -37.95], [175.05, -38.03]]]
+  }
+}
+```
+
+Supply a valid, nonempty Polygon or MultiPolygon geometry under the area-horizon validation rules.
+Points, Features, unclosed rings, self-intersections, and polygons crossing the antimeridian receive HTTP 422.
+The operation reads each candidate batch once and performs no geodesic calculations.
+It selects native cells with centres inside the geometry, plus cells containing samples from exterior and hole boundaries.
+The boundary spacing is no greater than one native cell, as in area-horizon v2.
+This includes slivers that contain no cell centre. Each selected cell counts once.
+
+The response contains `status`, `max_elevation_m`, `coordinates`, `evaluated_cells`, `unavailable_cells`, `coverage_complete`, and `provenance`.
+`max_elevation_m` preserves the highest valid native height without integer rounding or vertical conversion.
+`coordinates` is that cell's centre, which can lie outside the geometry when a boundary sample selects the cell.
+Ascending longitude, then latitude, breaks elevation ties.
+Zero and negative heights are valid. Unpublished geocells use the area-horizon sea-level policy and appear in `sea_level_assumed_tiles`.
+Restricted tiles, masked or nodata cells, and missing portions of a published raster count as unavailable.
+Network and upstream failures retain HTTP 502/504 responses.
+
+`status` is `ok` when any selected cell has valid data.
+If no selected cell has valid data, `status` is `unavailable`, with null elevation and coordinates.
+`coverage_complete` is true only when `unavailable_cells` is zero.
+With incomplete coverage, the returned maximum describes known cells and does not establish the highest elevation of the entire area.
+Reng must retain that coverage status with its stored result.
+
+Provenance reports sampling `native_cell_centre`, processor version `area-max-elevation-v1`, actual source tile hashes, and assumed sea-level geocells.
+The operation has independent limits: 250,000,000 candidate cells and a 300-second deadline by default.
+Exceeding its cell budget returns HTTP 422 with code `area_max_elevation_limit`.
+The total deadline includes acquisition and hashing and returns HTTP 504 with code `area_max_elevation_timeout`.
+Raster work runs outside the event loop with bounded 64 × 64 batches and cancellation checks.
+
+Run the two authenticated handover 03 probes against the local Compose service:
+
+```bash
+docker compose run --rm app python -m scripts.benchmark_area_max_elevation
+```
+
+The command keeps credentials in memory and prints results, cell counts, elapsed times, and the served OpenAPI SHA-256 hash.
+See [handover 03 results](docs/handovers/area-max-elevation.md) for actual measurements.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Change values there, then restart the app container. `app/config.py` defines the settings, types, validation, and defaults. Environment variables override those defaults.
@@ -271,6 +323,8 @@ Copy `.env.example` to `.env`. Change values there, then restart the app contain
 | `ELEVATION_MAX_BATCH_POINTS` | `1000` | Native elevation batch limit, from 1 through 1,000. |
 | `AREA_HORIZON_MAX_CELLS` | `25000000` | Conservative candidate-cell budget for area horizon. |
 | `AREA_HORIZON_TIMEOUT_SECONDS` | `300` | Total area-horizon deadline in seconds. |
+| `AREA_MAX_ELEVATION_MAX_CELLS` | `250000000` | Independent candidate-cell budget for area maxima. |
+| `AREA_MAX_ELEVATION_TIMEOUT_SECONDS` | `300` | Total area maximum-elevation deadline in seconds. |
 | `DEM_RESOLUTION_M` | `30` | Working-raster cell size in metres. |
 | `DEM_RESAMPLING_METHOD` | `bilinear` | Elevation interpolation for the working grid. |
 | `GEOMETRY_VERTICES_PER_SQ_KM` | `100` | Vertex budget density for the output geometry. |

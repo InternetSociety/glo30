@@ -38,6 +38,21 @@ TerrainGeometry = Annotated[
 ]
 
 
+def validate_polygon_geometry(geometry: PolygonGeometry | MultiPolygonGeometry) -> None:
+    polygons = (
+        [geometry.coordinates] if isinstance(geometry, PolygonGeometry) else geometry.coordinates
+    )
+    for polygon in polygons:
+        for ring in polygon:
+            if ring[0] != ring[-1]:
+                raise ValueError("Polygon rings must be closed")
+            if any(abs(a[0] - b[0]) > 180 for a, b in pairwise(ring)):
+                raise ValueError("Antimeridian-crossing polygons are not supported")
+    parsed = shape(geometry.model_dump())
+    if parsed.is_empty or not parsed.is_valid:
+        raise ValueError("Geometry must be valid and nonempty")
+
+
 class ElevationRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -123,21 +138,51 @@ class AreaHorizonRequest(BaseModel):
     def validate_geometry(self) -> Self:
         geometry = self.geometry
         if isinstance(geometry, PolygonGeometry | MultiPolygonGeometry):
-            polygons = (
-                [geometry.coordinates]
-                if isinstance(geometry, PolygonGeometry)
-                else geometry.coordinates
-            )
-            for polygon in polygons:
-                for ring in polygon:
-                    if ring[0] != ring[-1]:
-                        raise ValueError("Polygon rings must be closed")
-                    if any(abs(a[0] - b[0]) > 180 for a, b in pairwise(ring)):
-                        raise ValueError("Antimeridian-crossing polygons are not supported")
-            parsed = shape(geometry.model_dump())
-            if parsed.is_empty or not parsed.is_valid:
-                raise ValueError("Geometry must be valid and nonempty")
+            validate_polygon_geometry(geometry)
         return self
+
+
+class AreaMaxElevationRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [175.05, -38.03],
+                            [175.15, -38.03],
+                            [175.15, -37.95],
+                            [175.05, -37.95],
+                            [175.05, -38.03],
+                        ]
+                    ],
+                }
+            }
+        }
+    )
+    geometry: Annotated[PolygonGeometry | MultiPolygonGeometry, Field(discriminator="type")]
+
+    @model_validator(mode="after")
+    def validate_geometry(self) -> Self:
+        validate_polygon_geometry(self.geometry)
+        return self
+
+
+class AreaMaxElevationProvenance(DemProvenance):
+    sampling: Literal["native_cell_centre"] = "native_cell_centre"
+    processor_version: Literal["area-max-elevation-v1"] = "area-max-elevation-v1"
+    sea_level_assumed_tiles: list[str]
+
+
+class AreaMaxElevationResponse(BaseModel):
+    status: Literal["ok", "unavailable"]
+    max_elevation_m: float | None
+    coordinates: Coordinate | None
+    evaluated_cells: int
+    unavailable_cells: int
+    coverage_complete: bool
+    provenance: AreaMaxElevationProvenance
 
 
 class HorizonEvidence(BaseModel):
