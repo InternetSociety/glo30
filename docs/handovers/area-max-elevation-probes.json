@@ -1,0 +1,140 @@
+{
+  "service": "http://app:8004",
+  "checked_at": "2026-11-16T19:05:14.108924+00:00",
+  "cases": [
+    {
+      "name": "mount_pirongia",
+      "bounds": [
+        175.05,
+        -38.03,
+        175.15,
+        -37.95
+      ],
+      "geodesic_area_sq_km": 78.00319720205688,
+      "elapsed_seconds": 0.3735608300194144,
+      "http_status": 200,
+      "response": {
+        "status": "ok",
+        "max_elevation_m": 953.5536499023438,
+        "coordinates": [
+          175.09777777777776,
+          -37.992777777777775
+        ],
+        "evaluated_cells": 104331,
+        "unavailable_cells": 0,
+        "coverage_complete": true,
+        "provenance": {
+          "dem": "Copernicus GLO-30 DGED",
+          "horizontal_crs": "EPSG:4326",
+          "height_processing": "native DEM heights; no vertical transformation",
+          "tiles": [
+            {
+              "tile_id": "Copernicus_DSM_10_S38_00_E175_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/28/DEM1_SAR_DGE_30_20110128T173556_20141125T173648_ADS_000000_rJCH_aedaeae0",
+              "sha256": "18dbad03479a04c15ba39ded705e42b69b3d4122c6f8999b246dbb564f5538d5"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S39_00_E175_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/05/18/DEM1_SAR_DGE_30_20110518T173603_20140818T173725_ADS_000000_fLBR_7e3eb1c",
+              "sha256": "1f9bd2ed82b2cad77423c4ca7847d2a48648f3a2968ba9bf585de0db52773ec6"
+            }
+          ],
+          "sampling": "native_cell_centre",
+          "processor_version": "area-max-elevation-v1",
+          "sea_level_assumed_tiles": []
+        }
+      }
+    },
+    {
+      "name": "lower_south_island",
+      "bounds": [
+        166.4,
+        -46.7,
+        169.0,
+        -44.3
+      ],
+      "geodesic_area_sq_km": 54195.48738084693,
+      "elapsed_seconds": 61.120902096969076,
+      "http_status": 200,
+      "response": {
+        "status": "ok",
+        "max_elevation_m": 2894.48681640625,
+        "coordinates": [
+          168.7263888888889,
+          -44.384166666666665
+        ],
+        "evaluated_cells": 80888411,
+        "unavailable_cells": 0,
+        "coverage_complete": true,
+        "provenance": {
+          "dem": "Copernicus GLO-30 DGED",
+          "horizontal_crs": "EPSG:4326",
+          "height_processing": "native DEM heights; no vertical transformation",
+          "tiles": [
+            {
+              "tile_id": "Copernicus_DSM_10_S45_00_E167_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/14/DEM1_SAR_DGE_30_20101214T175535_20140828T175627_ADS_000000_1osS_8e2e5944",
+              "sha256": "1747b930dc25fc46b5adb9a9745045338268ec7740e364bd3c97e287b37d5aaf"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S45_00_E168_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/25/DEM1_SAR_DGE_30_20101225T175525_20140828T175627_ADS_000000_2QwF_9472dfba",
+              "sha256": "8502ab23c719825105beb2387ad63e8d457f1710e2d1fa3fb95247b2c0c22af8"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S45_00_E169_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/22/DEM1_SAR_DGE_30_20110122T174628_20140823T174728_ADS_000000_c1Hn_7e3eb1c",
+              "sha256": "b3e711c7d36a04bbcee525c061e9ab0492f4ee477131084866e81cd8cea482da"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S46_00_E166_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/14/DEM1_SAR_DGE_30_20101214T175535_20140828T175627_ADS_000000_6jJc_9472dfba",
+              "sha256": "ad63461ee0bcfc2074752430269df55d5c46c85ca156cb78f3fa10bf47535660"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S46_00_E167_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/14/DEM1_SAR_DGE_30_20101214T175535_20140828T175627_ADS_000000_N68K_9472dfba",
+              "sha256": "0587603e0e7bfc11693f32ca3312e79dfdf400abbcd3777830a32eab550758bd"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S46_00_E168_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/22/DEM1_SAR_DGE_30_20110122T174628_20140817T175619_ADS_000000_W7GS_0c7e4c7f",
+              "sha256": "dd9845cd4c712c2a9adabfe74bb44fe9ff15e253c8ee33c242b1de6b5a441259"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S46_00_E169_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/22/DEM1_SAR_DGE_30_20110122T174628_20140823T174728_ADS_000000_KX2F_7e3eb1c",
+              "sha256": "a3ed3d7d1d62a3299f53b0b9d121f8397e58b4ccd739099afa11109035cc7678"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S47_00_E166_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/14/DEM1_SAR_DGE_30_20101214T175535_20140828T175627_ADS_000000_0791_85f7b923",
+              "sha256": "bf18d5ef8197d449e60a0c64ef0670f7777a985194fa146d411dce18780f6047"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S47_00_E167_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2010/12/14/DEM1_SAR_DGE_30_20101214T175535_20140828T175627_ADS_000000_0827_bf5f8c79",
+              "sha256": "f6d899ac3aa400d3d3792297aca9ba69d167ea13047961c8ef09141c34a0ea1f"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S47_00_E168_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/22/DEM1_SAR_DGE_30_20110122T174628_20140817T175619_ADS_000000_A1OL_8303cb54",
+              "sha256": "c46c34b66b7cbc5962302b8142b7fcf3d30b6450ef3d28f4f5ca1a6f423cd032"
+            },
+            {
+              "tile_id": "Copernicus_DSM_10_S47_00_E169_00",
+              "product_id": "CCM/COP-DEM_GLO-30-DGED/SAR_DGE_30_A4AD/2011/01/22/DEM1_SAR_DGE_30_20110122T174628_20140413T174739_ADS_000000_LhAD_7e3eb1c",
+              "sha256": "104fa292646a52a4710b484a44a1a1150c30b64bbae4ab78d323f6ce0300acbe"
+            }
+          ],
+          "sampling": "native_cell_centre",
+          "processor_version": "area-max-elevation-v1",
+          "sea_level_assumed_tiles": [
+            "Copernicus_DSM_10_S45_00_E166_00"
+          ]
+        }
+      }
+    }
+  ],
+  "openapi_sha256": "0e8f1b5901bcda76f2e66b3ada424e608e346a13f3cf50290552a7d812b29f39"
+}

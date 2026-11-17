@@ -129,6 +129,8 @@ class Settings(BaseSettings):
     elevation_max_batch_points: int = Field(default=1000, ge=1, le=1000)
     area_horizon_max_cells: int = Field(default=25_000_000, ge=1)
     area_horizon_timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
+    area_max_elevation_max_cells: int = Field(default=250_000_000, ge=1)
+    area_max_elevation_timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_geometry_vertex_budgets(self) -> Self:

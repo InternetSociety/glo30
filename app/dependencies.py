@@ -10,6 +10,7 @@ from app.models.user import User
 from app.repositories.cached_tiles import CachedTileRepository
 from app.repositories.users import UserRepository
 from app.services.area_horizon import AreaHorizonService
+from app.services.area_max_elevation import AreaMaxElevationService
 from app.services.auth import (
     CSRF_COOKIE_NAME,
     SESSION_COOKIE_NAME,
@@ -99,6 +100,12 @@ def get_elevation_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Eleva
 
 def get_area_horizon_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AreaHorizonService:
     return AreaHorizonService(S3TileService(CachedTileRepository(db), settings), settings)
+
+
+def get_area_max_elevation_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AreaMaxElevationService:
+    return AreaMaxElevationService(S3TileService(CachedTileRepository(db), settings), settings)
 
 
 async def verify_csrf_token(

@@ -72,3 +72,7 @@ class TerrainLimitError(ApplicationError):
 
 class AreaHorizonTimeoutError(ApplicationError):
     pass
+
+
+class AreaMaxElevationTimeoutError(ApplicationError):
+    pass

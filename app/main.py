@@ -21,6 +21,7 @@ from app.dependencies import get_current_active_user, get_current_user
 from app.exceptions import (
     ApplicationError,
     AreaHorizonTimeoutError,
+    AreaMaxElevationTimeoutError,
     CopernicusConfigurationError,
     CopernicusTimeoutError,
     DemCoverageError,
@@ -182,6 +183,7 @@ def register_exception_handlers(application: FastAPI) -> None:
         (RadiusLimitError, status.HTTP_422_UNPROCESSABLE_CONTENT),
         (TerrainLimitError, status.HTTP_422_UNPROCESSABLE_CONTENT),
         (AreaHorizonTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT),
+        (AreaMaxElevationTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT),
         (DemCoverageError, status.HTTP_422_UNPROCESSABLE_CONTENT),
         (CopernicusTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT),
         (CopernicusConfigurationError, status.HTTP_502_BAD_GATEWAY),

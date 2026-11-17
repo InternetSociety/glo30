@@ -160,7 +160,7 @@ def batch_distance_bounds(windows: list[Window], transform: Any, observer: Coord
 def plan_batches(
     plan: RasterPlan,
     boundary: BaseGeometry,
-    observer: Coordinate,
+    observer: Coordinate | None,
     deadline: float,
     cancelled: Event,
 ) -> None:
@@ -190,7 +190,11 @@ def plan_batches(
         )
         for key in sorted(keys)
     ]
-    plan.lower_bounds = batch_distance_bounds(plan.windows, plan.transform, observer)
+    plan.lower_bounds = (
+        batch_distance_bounds(plan.windows, plan.transform, observer)
+        if observer is not None
+        else np.zeros(len(plan.windows))
+    )
     west = np.array([plan.transform.c + w.col_off * plan.transform.a for w in plan.windows])
     north = np.array([plan.transform.f + w.row_off * plan.transform.e for w in plan.windows])
     east = west + np.array([w.width * plan.transform.a for w in plan.windows])
